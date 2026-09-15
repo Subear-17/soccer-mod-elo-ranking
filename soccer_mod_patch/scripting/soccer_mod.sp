@@ -1,7 +1,7 @@
 // **************************************************************************************************************
 // ************************************************** DEFINES ***************************************************
 // ************************************************************************************************************** 
-#define PLUGIN_VERSION "1.3.8BS_TEST"
+#define PLUGIN_VERSION "1.3.7.1"
 #define UPDATE_URL "https://raw.githubusercontent.com/MK99MA/SoMoE-19/master/addons/sourcemod/updatefile.txt"
 #define MAX_NAMES 10
 #define MAXCONES_DYN 15
@@ -24,58 +24,55 @@
 #include <updater>
 #undef REQUIRE_EXTENSIONS
 #include <SteamWorks>
-#include <geoip>
 
 #pragma newdecls required
 
-#include "soccer_mod/globals.sp"
-#include "soccer_mod/server_commands.sp"
-#include "soccer_mod/client_commands.sp"
-#include "soccer_mod/colormenu.sp"
-#include "soccer_mod/database.sp"
-#include "soccer_mod/menus.sp"
-#include "soccer_mod/createconfig.sp"
+#include "soccer_mod\globals.sp"
+#include "soccer_mod\server_commands.sp"
+#include "soccer_mod\client_commands.sp"
+#include "soccer_mod\colormenu.sp"
+#include "soccer_mod\database.sp"
+#include "soccer_mod\menus.sp"
+#include "soccer_mod\createconfig.sp"
 
-// Hard dependency - soccer_mod's cap-tiebreak/pick-menu/match-rating logic calls straight into
-// elo_ranking's natives with no fallback, so refuse to load at all rather than risk a runtime
-// native-not-found error mid-match if elo_ranking.smx is ever missing.
-#define REQUIRE_PLUGIN
+// elo_ranking: OPTIONAL dependency, deliberately - every call site below is guarded with a
+// GetFeatureStatus() check and falls back to normal (pre-ELO) behavior if this plugin isn't
+// loaded, so installing or removing elo_ranking.smx never breaks soccer_mod itself.
 #include "elo_ranking.inc"
-#undef REQUIRE_PLUGIN
 
-#include "soccer_mod/modules/adminmanagement.sp"
-#include "soccer_mod/modules/afkkicker.sp"
-#include "soccer_mod/modules/cap.sp"
-#include "soccer_mod/modules/deadchat.sp"
-#include "soccer_mod/modules/duckjumpblock.sp"
-#include "soccer_mod/modules/health.sp"
-#include "soccer_mod/modules/readycheck.sp"
-#include "soccer_mod/modules/match.sp"
-#include "soccer_mod/modules/kickoffwall.sp"
-#include "soccer_mod/modules/ranking.sp"
-#include "soccer_mod/modules/referee.sp"
-#include "soccer_mod/modules/respawn.sp"
-#include "soccer_mod/modules/settings.sp"
-#include "soccer_mod/modules/chatset.sp"
-#include "soccer_mod/modules/skins.sp"
-#include "soccer_mod/modules/sprint.sp"
-#include "soccer_mod/modules/sounds.sp"
-#include "soccer_mod/modules/stats.sp"
-#include "soccer_mod/modules/training.sp"
-#include "soccer_mod/modules/training_personalcannon.sp"
-#include "soccer_mod/modules/savelogs.sp"
-#include "soccer_mod/modules/serverinfo.sp"
-#include "soccer_mod/modules/joinlist.sp"
-#include "soccer_mod/modules/mapdefaults.sp"
-#include "soccer_mod/modules/gkareas.sp"
-#include "soccer_mod/modules/training_adv.sp"
-#include "soccer_mod/modules/shout.sp"
-#include "soccer_mod/modules/grassreplacer.sp"
-#include "soccer_mod/modules/spawnball.sp"
+#include "soccer_mod\modules\adminmanagement.sp"
+#include "soccer_mod\modules\afkkicker.sp"
+#include "soccer_mod\modules\cap.sp"
+#include "soccer_mod\modules\deadchat.sp"
+#include "soccer_mod\modules\duckjumpblock.sp"
+#include "soccer_mod\modules\health.sp"
+#include "soccer_mod\modules\readycheck.sp"
+#include "soccer_mod\modules\match.sp"
+#include "soccer_mod\modules\kickoffwall.sp"
+#include "soccer_mod\modules\ranking.sp"
+#include "soccer_mod\modules\referee.sp"
+#include "soccer_mod\modules\respawn.sp"
+#include "soccer_mod\modules\settings.sp"
+#include "soccer_mod\modules\chatset.sp"
+#include "soccer_mod\modules\skins.sp"
+#include "soccer_mod\modules\sprint.sp"
+#include "soccer_mod\modules\sounds.sp"
+#include "soccer_mod\modules\stats.sp"
+#include "soccer_mod\modules\training.sp"
+#include "soccer_mod\modules\training_personalcannon.sp"
+#include "soccer_mod\modules\savelogs.sp"
+#include "soccer_mod\modules\serverinfo.sp"
+#include "soccer_mod\modules\joinlist.sp"
+#include "soccer_mod\modules\mapdefaults.sp"
+#include "soccer_mod\modules\gkareas.sp"
+#include "soccer_mod\modules\training_adv.sp"
+#include "soccer_mod\modules\shout.sp"
+#include "soccer_mod\modules\grassreplacer.sp"
+#include "soccer_mod\modules\spawnball.sp"
 
-#include "soccer_mod/fixes/join_team.sp"
-#include "soccer_mod/fixes/radio_commands.sp"
-#include "soccer_mod/fixes/remove_knives.sp"
+#include "soccer_mod\fixes\join_team.sp"
+#include "soccer_mod\fixes\radio_commands.sp"
+#include "soccer_mod\fixes\remove_knives.sp"
 
 // *****************************************************************************************************************
 // ************************************************** PLUGIN INFO **************************************************
@@ -96,13 +93,15 @@ public void OnPluginStart()
 {
 	CreateConVar("soccer_mod_version", PLUGIN_VERSION, "Soccer Mod version", FCVAR_NOTIFY| FCVAR_DONTRECORD);
 
+	// elo_ranking: exposes this server's own match/lifetime stats to the ELO plugin - see
+	// elo_ranking.inc for exactly what each native returns and why.
 	CreateNative("SoccerMod_GetMatchPoints", Native_SoccerMod_GetMatchPoints);
 	CreateNative("SoccerMod_GetMatchStatBreakdown", Native_SoccerMod_GetMatchStatBreakdown);
 	CreateNative("SoccerMod_GetPublicStats", Native_SoccerMod_GetPublicStats);
 	CreateNative("SoccerMod_GetCardAttributes", Native_SoccerMod_GetCardAttributes);
 	CreateNative("SoccerMod_GetTopPlayersByPoints", Native_SoccerMod_GetTopPlayersByPoints);
 	RegPluginLibrary("soccer_mod");
-
+	
 	// Updater******************************************
 	if (LibraryExists("updater"))
 	{
@@ -562,7 +561,19 @@ public void OnTakeDamage(char[] output, int caller, int activator, float delay)
 public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max)
 {
 	bLATE_LOAD = late;
-	
+
+	// elo_ranking: mark every native we call as optional here (native binding happens between
+	// AskPluginLoad2 and OnPluginStart - marking it any later has no effect) so soccer_mod loads
+	// fine even if elo_ranking.smx isn't installed; every call site below checks
+	// GetFeatureStatus() before actually using these.
+	MarkNativeAsOptional("Elo_OnMatchStart");
+	MarkNativeAsOptional("Elo_OnMatchEnd");
+	MarkNativeAsOptional("Elo_CheckHalftimeSwap");
+	MarkNativeAsOptional("Elo_InvalidateMatch");
+	MarkNativeAsOptional("Elo_GetCapRating");
+	MarkNativeAsOptional("Elo_GetRating");
+	MarkNativeAsOptional("Elo_GetDisplayName");
+
 	return APLRes_Success;
 }
 
@@ -686,9 +697,10 @@ public void OnAllPluginsLoaded()
 {
 	AddDownloads();
 
-	// Created by elo_ranking.smx (used in cap.sp's tiebreak check) - fetched here rather than at
-	// OnPluginStart-time since elo_ranking's own OnPluginStart isn't guaranteed to have already
-	// run yet at that point; OnAllPluginsLoaded fires only once every plugin has finished starting.
+	// elo_ranking: created by elo_ranking.smx (used in cap.sp's tiebreak check) - fetched here
+	// rather than at OnPluginStart-time since elo_ranking's own OnPluginStart isn't guaranteed to
+	// have already run yet at that point; OnAllPluginsLoaded fires only once every plugin has
+	// finished starting.
 	cv_EloCapTiebreakPct = FindConVar("sm_soccermod_elo_tiebreak_pct");
 	/*AddDirToDownloads("sound/soccermod");
 	AddDirToDownloads("materials/models/soccer_mod");
@@ -784,212 +796,10 @@ public void OnClientPostAdminCheck(int client)
 	ReplacerOnClientPostAdminCheck(client); 
 }
 
-public void AnnounceClientCountry(int client)
-{
-	if (IsFakeClient(client)) return;
-	char ip[32];
-	GetClientIP(client, ip, sizeof(ip));
-
-	char country[64];
-	bool ok = GeoipCountry(ip, country, sizeof(country));
-	LogMessage("[GEOIP-DEBUG] client=%N ip=%s lookup_ok=%i country=%s", client, ip, ok, ok ? country : "n/a");
-	if (ok)
-	{
-		CPrintToChatAll("{%s}[%s] {%s}%N connected from %s.", prefixcolor, prefix, textcolor, client, country);
-	}
-}
-
-// REVERTED AGAIN (2026-09-10): not everyone on the server is in the "Titans" group - the whole
-// point of clan tags here is letting each player (including strangers who join) show their OWN
-// real group. A blanket force would misrepresent everyone who isn't actually a Titans member.
-// The underlying Valve bug (github.com/ValveSoftware/Source-1-Games/issues/2853) only affects
-// players whose OWN group is newly created - there's no way to force the *correct* per-player
-// tag server-side, since for affected players the real value never reaches the server at all.
-// Leaving this untouched: players in older/established groups should already work natively;
-// only players in a brand-new group (possibly just Titans members) are stuck with no fix.
-
 public void OnClientAuthorized(int client)
 {	
 	LCOnClientConnected(client);
 	return;
-}
-
-// Exposed to elo_ranking.smx via the SoccerMod_GetMatchPoints native - see elo_ranking.inc.
-// Logic moved verbatim from the old elo.sp's EloGetMatchPoints(), unchanged.
-public any Native_SoccerMod_GetMatchPoints(Handle plugin, int numParams)
-{
-	char steamid[32];
-	GetNativeString(1, steamid, sizeof(steamid));
-
-	if (statsKeygroupMatch == null) return 0.0;
-	if (!statsKeygroupMatch.JumpToKey(steamid, false)) return 0.0;
-	float points = float(statsKeygroupMatch.GetNum("points", 0));
-	statsKeygroupMatch.GoBack();
-	return points;
-}
-
-// Exposed to elo_ranking.smx via the SoccerMod_GetPublicStats native - see elo_ranking.inc.
-// Reads the lifetime totals from soccer_mod's own soccer_mod_public_stats SQL table (goals,
-// assists, own_goals, hits, passes, interceptions, ball_losses, saves, rounds_won, rounds_lost,
-// points, mvp, motm - matching the exact column order documented in the .inc). A synchronous
-// SQL_Query is fine here: it's SQLite-backed, a single primary-key row lookup, and only runs once
-// per menu open, not on any hot path.
-public any Native_SoccerMod_GetPublicStats(Handle plugin, int numParams)
-{
-	char steamid[32], safeSteamid[64];
-	GetNativeString(1, steamid, sizeof(steamid));
-
-	if (db == INVALID_HANDLE) return false;
-
-	SQL_EscapeString(db, steamid, safeSteamid, sizeof(safeSteamid));
-
-	char query[400];
-	Format(query, sizeof(query),
-		"SELECT goals, assists, own_goals, hits, passes, interceptions, ball_losses, saves, rounds_won, rounds_lost, points, mvp, motm FROM soccer_mod_public_stats WHERE steamid = '%s'",
-		safeSteamid);
-
-	Handle rs = SQL_Query(db, query);
-	if (rs == INVALID_HANDLE || !SQL_FetchRow(rs))
-	{
-		if (rs != INVALID_HANDLE) CloseHandle(rs);
-		return false;
-	}
-
-	int outStats[13];
-	for (int i = 0; i < 13; i++) outStats[i] = SQL_FetchInt(rs, i);
-	CloseHandle(rs);
-
-	SetNativeArray(2, outStats, 13);
-	return true;
-}
-
-// Exposed to elo_ranking.smx via the SoccerMod_GetCardAttributes native - see elo_ranking.inc.
-// Percentile-rank based, not fixed scale constants: fetches this player's per-round rates for
-// 4 derived metrics, then scans the whole soccer_mod_public_stats table once to see what fraction
-// of the rated population they beat on each metric, and maps that fraction onto a 40-99 band (the
-// same floor/ceiling FIFA-style cards use). Self-calibrating as the playerbase's stats evolve -
-// no manual retuning needed if the community's average goals/round etc. drifts over time.
-public any Native_SoccerMod_GetCardAttributes(Handle plugin, int numParams)
-{
-	char steamid[32], safeSteamid[64];
-	GetNativeString(1, steamid, sizeof(steamid));
-
-	if (db == INVALID_HANDLE) return false;
-	SQL_EscapeString(db, steamid, safeSteamid, sizeof(safeSteamid));
-
-	char query[300];
-	Format(query, sizeof(query),
-		"SELECT goals, assists, passes, saves, interceptions, hits, rounds_won, rounds_lost FROM soccer_mod_public_stats WHERE steamid = '%s'",
-		safeSteamid);
-	Handle rs = SQL_Query(db, query);
-	if (rs == INVALID_HANDLE || !SQL_FetchRow(rs))
-	{
-		if (rs != INVALID_HANDLE) CloseHandle(rs);
-		return false;
-	}
-
-	int pGoals = SQL_FetchInt(rs, 0), pAssists = SQL_FetchInt(rs, 1), pPasses = SQL_FetchInt(rs, 2);
-	int pSaves = SQL_FetchInt(rs, 3), pInter = SQL_FetchInt(rs, 4), pHits = SQL_FetchInt(rs, 5);
-	int pRW = SQL_FetchInt(rs, 6), pRL = SQL_FetchInt(rs, 7);
-	CloseHandle(rs);
-
-	int myRounds = pRW + pRL;
-	if (myRounds < 1) myRounds = 1;
-
-	float myShoot = float(pGoals) / float(myRounds);
-	float myPass  = (float(pAssists) * 3.0 + float(pPasses)) / float(myRounds);
-	float myDef   = (float(pSaves) * 5.0 + float(pInter)) / float(myRounds);
-	float myPhys  = float(pHits) / float(myRounds);
-
-	Handle rsAll = SQL_Query(db, "SELECT goals, assists, passes, saves, interceptions, hits, rounds_won, rounds_lost FROM soccer_mod_public_stats");
-	if (rsAll == INVALID_HANDLE) return false;
-
-	int totalPlayers = 0, belowShoot = 0, belowPass = 0, belowDef = 0, belowPhys = 0;
-	while (SQL_FetchRow(rsAll))
-	{
-		int g = SQL_FetchInt(rsAll, 0), a = SQL_FetchInt(rsAll, 1), p = SQL_FetchInt(rsAll, 2);
-		int sv = SQL_FetchInt(rsAll, 3), it = SQL_FetchInt(rsAll, 4), h = SQL_FetchInt(rsAll, 5);
-		int rw = SQL_FetchInt(rsAll, 6), rl = SQL_FetchInt(rsAll, 7);
-		int r = rw + rl;
-		if (r < 1) r = 1;
-
-		float shoot = float(g) / float(r);
-		float pass  = (float(a) * 3.0 + float(p)) / float(r);
-		float def_  = (float(sv) * 5.0 + float(it)) / float(r);
-		float phys  = float(h) / float(r);
-
-		if (shoot < myShoot) belowShoot++;
-		if (pass  < myPass)  belowPass++;
-		if (def_  < myDef)   belowDef++;
-		if (phys  < myPhys)  belowPhys++;
-		totalPlayers++;
-	}
-	CloseHandle(rsAll);
-	if (totalPlayers < 1) return false;
-
-	int outAttrs[4];
-	outAttrs[0] = 40 + RoundToNearest((float(belowShoot) / float(totalPlayers)) * 59.0);
-	outAttrs[1] = 40 + RoundToNearest((float(belowPass)  / float(totalPlayers)) * 59.0);
-	outAttrs[2] = 40 + RoundToNearest((float(belowDef)   / float(totalPlayers)) * 59.0);
-	outAttrs[3] = 40 + RoundToNearest((float(belowPhys)  / float(totalPlayers)) * 59.0);
-
-	SetNativeArray(2, outAttrs, 4);
-	return true;
-}
-
-// Exposed to elo_ranking.smx via the SoccerMod_GetMatchStatBreakdown native - see elo_ranking.inc.
-// Reads THIS match's live in-memory breakdown (statsKeygroupMatch), not the lifetime SQL table -
-// used by the Ranked track, which keeps its own separate running totals gated to only qualifying
-// matches, rather than pulling from soccer_mod's own ungated lifetime history.
-public any Native_SoccerMod_GetMatchStatBreakdown(Handle plugin, int numParams)
-{
-	char steamid[32];
-	GetNativeString(1, steamid, sizeof(steamid));
-
-	if (statsKeygroupMatch == null) return false;
-	if (!statsKeygroupMatch.JumpToKey(steamid, false)) return false;
-
-	int outStats[7];
-	outStats[0] = statsKeygroupMatch.GetNum("goals", 0);
-	outStats[1] = statsKeygroupMatch.GetNum("assists", 0);
-	outStats[2] = statsKeygroupMatch.GetNum("own_goals", 0);
-	outStats[3] = statsKeygroupMatch.GetNum("saves", 0);
-	outStats[4] = statsKeygroupMatch.GetNum("passes", 0);
-	outStats[5] = statsKeygroupMatch.GetNum("interceptions", 0);
-	outStats[6] = statsKeygroupMatch.GetNum("hits", 0);
-	statsKeygroupMatch.GoBack();
-
-	SetNativeArray(2, outStats, 7);
-	return true;
-}
-
-// Exposed to elo_ranking.smx via the SoccerMod_GetTopPlayersByPoints native - see elo_ranking.inc.
-// Feeds the Unranked leaderboard (sorted by the old ungated lifetime "points" column).
-public any Native_SoccerMod_GetTopPlayersByPoints(Handle plugin, int numParams)
-{
-	ArrayList steamidsOut = GetNativeCell(1);
-	ArrayList pointsOut = GetNativeCell(2);
-	int maxCount = GetNativeCell(3);
-
-	if (db == INVALID_HANDLE) return 0;
-
-	char query[128];
-	Format(query, sizeof(query), "SELECT steamid, points FROM soccer_mod_public_stats ORDER BY points DESC LIMIT %i", maxCount);
-	Handle rs = SQL_Query(db, query);
-	if (rs == INVALID_HANDLE) return 0;
-
-	int count = 0;
-	char steamid[32];
-	while (SQL_FetchRow(rs))
-	{
-		SQL_FetchString(rs, 0, steamid, sizeof(steamid));
-		int points = SQL_FetchInt(rs, 1);
-		steamidsOut.PushString(steamid);
-		pointsOut.Push(points);
-		count++;
-	}
-	CloseHandle(rs);
-	return count;
 }
 
 public void OnClientPutInServer(int client)
@@ -1007,7 +817,6 @@ public void OnClientPutInServer(int client)
 	SkinsOnClientPutInServer(client);
 	//SprintOnClientPutInServer(client);
 	AFKKickOnClientPutInServer(client);
-	AnnounceClientCountry(client);
 	
 	//LCOnClientConnected(client);
 
@@ -1859,4 +1668,169 @@ stock int changeConvar(Handle hConvar, char[] strCvarName, char[] strValue)
 	SetConVarString(hConvar, strValue, true);
 	SetCommandFlags(strCvarName, flags);
 	return 1;
+}
+
+// ****************************************************************************************************
+// ******************************************** ELO_RANKING NATIVES ********************************************
+// ****************************************************************************************************
+// Everything below is exposed to elo_ranking.smx - see elo_ranking.inc for the exact contract of
+// each native. None of this touches soccer_mod's own gameplay logic; it only reads existing state
+// (statsKeygroupMatch, the soccer_mod_public_stats table) that already exists regardless of
+// whether elo_ranking is installed.
+
+public any Native_SoccerMod_GetMatchPoints(Handle plugin, int numParams)
+{
+	char steamid[32];
+	GetNativeString(1, steamid, sizeof(steamid));
+
+	if (statsKeygroupMatch == null) return 0.0;
+	if (!statsKeygroupMatch.JumpToKey(steamid, false)) return 0.0;
+	float points = float(statsKeygroupMatch.GetNum("points", 0));
+	statsKeygroupMatch.GoBack();
+	return points;
+}
+
+public any Native_SoccerMod_GetMatchStatBreakdown(Handle plugin, int numParams)
+{
+	char steamid[32];
+	GetNativeString(1, steamid, sizeof(steamid));
+
+	if (statsKeygroupMatch == null) return false;
+	if (!statsKeygroupMatch.JumpToKey(steamid, false)) return false;
+
+	int outStats[7];
+	outStats[0] = statsKeygroupMatch.GetNum("goals", 0);
+	outStats[1] = statsKeygroupMatch.GetNum("assists", 0);
+	outStats[2] = statsKeygroupMatch.GetNum("own_goals", 0);
+	outStats[3] = statsKeygroupMatch.GetNum("saves", 0);
+	outStats[4] = statsKeygroupMatch.GetNum("passes", 0);
+	outStats[5] = statsKeygroupMatch.GetNum("interceptions", 0);
+	outStats[6] = statsKeygroupMatch.GetNum("hits", 0);
+	statsKeygroupMatch.GoBack();
+
+	SetNativeArray(2, outStats, 7);
+	return true;
+}
+
+public any Native_SoccerMod_GetPublicStats(Handle plugin, int numParams)
+{
+	char steamid[32], safeSteamid[64];
+	GetNativeString(1, steamid, sizeof(steamid));
+
+	if (db == INVALID_HANDLE) return false;
+	SQL_EscapeString(db, steamid, safeSteamid, sizeof(safeSteamid));
+
+	char query[400];
+	Format(query, sizeof(query),
+		"SELECT goals, assists, own_goals, hits, passes, interceptions, ball_losses, saves, rounds_won, rounds_lost, points, mvp, motm FROM soccer_mod_public_stats WHERE steamid = '%s'",
+		safeSteamid);
+
+	Handle rs = SQL_Query(db, query);
+	if (rs == INVALID_HANDLE || !SQL_FetchRow(rs))
+	{
+		if (rs != INVALID_HANDLE) CloseHandle(rs);
+		return false;
+	}
+
+	int outStats[13];
+	for (int i = 0; i < 13; i++) outStats[i] = SQL_FetchInt(rs, i);
+	CloseHandle(rs);
+
+	SetNativeArray(2, outStats, 13);
+	return true;
+}
+
+public any Native_SoccerMod_GetCardAttributes(Handle plugin, int numParams)
+{
+	char steamid[32], safeSteamid[64];
+	GetNativeString(1, steamid, sizeof(steamid));
+
+	if (db == INVALID_HANDLE) return false;
+	SQL_EscapeString(db, steamid, safeSteamid, sizeof(safeSteamid));
+
+	char query[300];
+	Format(query, sizeof(query),
+		"SELECT goals, assists, passes, saves, interceptions, hits, rounds_won, rounds_lost FROM soccer_mod_public_stats WHERE steamid = '%s'",
+		safeSteamid);
+	Handle rs = SQL_Query(db, query);
+	if (rs == INVALID_HANDLE || !SQL_FetchRow(rs))
+	{
+		if (rs != INVALID_HANDLE) CloseHandle(rs);
+		return false;
+	}
+
+	int pGoals = SQL_FetchInt(rs, 0), pAssists = SQL_FetchInt(rs, 1), pPasses = SQL_FetchInt(rs, 2);
+	int pSaves = SQL_FetchInt(rs, 3), pInter = SQL_FetchInt(rs, 4), pHits = SQL_FetchInt(rs, 5);
+	int pRW = SQL_FetchInt(rs, 6), pRL = SQL_FetchInt(rs, 7);
+	CloseHandle(rs);
+
+	int myRounds = pRW + pRL;
+	if (myRounds < 1) myRounds = 1;
+
+	float myShoot = float(pGoals) / float(myRounds);
+	float myPass  = (float(pAssists) * 3.0 + float(pPasses)) / float(myRounds);
+	float myDef   = (float(pSaves) * 5.0 + float(pInter)) / float(myRounds);
+	float myPhys  = float(pHits) / float(myRounds);
+
+	Handle rsAll = SQL_Query(db, "SELECT goals, assists, passes, saves, interceptions, hits, rounds_won, rounds_lost FROM soccer_mod_public_stats");
+	if (rsAll == INVALID_HANDLE) return false;
+
+	int totalPlayers = 0, belowShoot = 0, belowPass = 0, belowDef = 0, belowPhys = 0;
+	while (SQL_FetchRow(rsAll))
+	{
+		int g = SQL_FetchInt(rsAll, 0), a = SQL_FetchInt(rsAll, 1), p = SQL_FetchInt(rsAll, 2);
+		int sv = SQL_FetchInt(rsAll, 3), it = SQL_FetchInt(rsAll, 4), h = SQL_FetchInt(rsAll, 5);
+		int rw = SQL_FetchInt(rsAll, 6), rl = SQL_FetchInt(rsAll, 7);
+		int r = rw + rl;
+		if (r < 1) r = 1;
+
+		float shoot = float(g) / float(r);
+		float pass  = (float(a) * 3.0 + float(p)) / float(r);
+		float def_  = (float(sv) * 5.0 + float(it)) / float(r);
+		float phys  = float(h) / float(r);
+
+		if (shoot < myShoot) belowShoot++;
+		if (pass  < myPass)  belowPass++;
+		if (def_  < myDef)   belowDef++;
+		if (phys  < myPhys)  belowPhys++;
+		totalPlayers++;
+	}
+	CloseHandle(rsAll);
+	if (totalPlayers < 1) return false;
+
+	int outAttrs[4];
+	outAttrs[0] = 40 + RoundToNearest((float(belowShoot) / float(totalPlayers)) * 59.0);
+	outAttrs[1] = 40 + RoundToNearest((float(belowPass)  / float(totalPlayers)) * 59.0);
+	outAttrs[2] = 40 + RoundToNearest((float(belowDef)   / float(totalPlayers)) * 59.0);
+	outAttrs[3] = 40 + RoundToNearest((float(belowPhys)  / float(totalPlayers)) * 59.0);
+
+	SetNativeArray(2, outAttrs, 4);
+	return true;
+}
+
+public any Native_SoccerMod_GetTopPlayersByPoints(Handle plugin, int numParams)
+{
+	ArrayList steamidsOut = GetNativeCell(1);
+	ArrayList pointsOut = GetNativeCell(2);
+	int maxCount = GetNativeCell(3);
+
+	if (db == INVALID_HANDLE) return 0;
+
+	char query[128];
+	Format(query, sizeof(query), "SELECT steamid, points FROM soccer_mod_public_stats ORDER BY points DESC LIMIT %i", maxCount);
+	Handle rs = SQL_Query(db, query);
+	if (rs == INVALID_HANDLE) return 0;
+
+	int count = 0;
+	char steamid[32];
+	while (SQL_FetchRow(rs))
+	{
+		SQL_FetchString(rs, 0, steamid, sizeof(steamid));
+		int points = SQL_FetchInt(rs, 1);
+		steamidsOut.PushString(steamid);
+		pointsOut.Push(points);
+		count++;
+	}
+	CloseHandle(rs);
+	return count;
 }
