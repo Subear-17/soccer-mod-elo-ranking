@@ -190,6 +190,23 @@ public void OnPluginStart()
 	RegPluginLibrary("elo_ranking");
 
 	RegConsoleCmd("sm_elo", Cmd_Elo, "Opens the ELO ranking menu (chat trigger: !elo)");
+
+	// Loud and immediate, not just documented in the README - so an installer sees this the
+	// moment they load the plugin, in the same server console they're already watching for
+	// startup errors, rather than only discovering it later as an unexplained "why no names?"
+	// support question.
+	CreateTimer(3.0, Timer_EloWarnMissingApiKey);
+}
+
+public Action Timer_EloWarnMissingApiKey(Handle timer)
+{
+	char apiKey[64];
+	cv_EloSteamApiKey.GetString(apiKey, sizeof(apiKey));
+	if (apiKey[0] == '\0')
+	{
+		LogMessage("[elo_ranking] sm_soccermod_elo_steamapikey is not set - historic players will show raw SteamIDs on the leaderboards instead of real names. This is optional; see the README for how to get a free key.");
+	}
+	return Plugin_Stop;
 }
 
 public Action Cmd_Elo(int client, int args)
@@ -863,6 +880,22 @@ public int EloHttp_OnPlayerSummaries(Handle request, bool failure, bool requestS
 	return 0;
 }
 
+// Makes the "raw SteamID instead of a name" state impossible to miss, instead of silently
+// showing nothing - this note appears directly on both leaderboard menus (where an installer
+// will actually be looking) whenever the feature is off because no key is configured, so nobody
+// has to guess why old players aren't resolving to real names.
+void EloGetApiSetupNote(char[] outNote, int outSize)
+{
+	char apiKey[64];
+	cv_EloSteamApiKey.GetString(apiKey, sizeof(apiKey));
+	if (apiKey[0] != '\0')
+	{
+		outNote[0] = '\0';
+		return;
+	}
+	strcopy(outNote, outSize, "\n(Old players show raw SteamIDs - set sm_soccermod_elo_steamapikey to fix this, see README)");
+}
+
 void EloStoreApiLookupResult(const char[] steamid, const char[] apiName)
 {
 	KeyValues kv = new KeyValues("EloRatings");
@@ -995,8 +1028,10 @@ public void OpenEloLeaderboardMenu(int client)
 	}
 
 	Menu menu = new Menu(EloLeaderboardMenuHandler);
-	char titleString[128];
-	Format(titleString, sizeof(titleString), "Ranked Leaderboard (%i players, 6v6)\nClick a name for their Career page", count);
+	char titleString[192];
+	char apiNote[128];
+	EloGetApiSetupNote(apiNote, sizeof(apiNote));
+	Format(titleString, sizeof(titleString), "Ranked Leaderboard (%i players, 6v6)\nClick a name for their Career page%s", count, apiNote);
 	menu.SetTitle(titleString);
 
 	if (count == 0)
@@ -1080,8 +1115,10 @@ public void OpenEloUnrankedLeaderboardMenu(int client)
 		count = SoccerMod_GetTopPlayersByPoints(steamidList, pointsList, ELO_UNRANKED_MAX);
 	}
 
-	char titleString[128];
-	Format(titleString, sizeof(titleString), "Unranked Leaderboard (%i players)\nClick a name for their Career page", count);
+	char titleString[192];
+	char apiNote[128];
+	EloGetApiSetupNote(apiNote, sizeof(apiNote));
+	Format(titleString, sizeof(titleString), "Unranked Leaderboard (%i players)\nClick a name for their Career page%s", count, apiNote);
 	menu.SetTitle(titleString);
 
 	if (count == 0)
