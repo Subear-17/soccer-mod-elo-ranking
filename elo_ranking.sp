@@ -7,6 +7,14 @@
 #include <sdktools>
 #include <cstrike>
 #include <morecolors>
+
+// <sourcemod> itself unconditionally #defines REQUIRE_EXTENSIONS (see core.inc) as the default
+// for anything included afterward - so without this #undef, SteamWorks.inc's own SharedPlugin-
+// style Extension marker would compile with required=1, making the WHOLE plugin refuse to load
+// the instant the SteamWorks extension isn't installed, regardless of MarkNativeAsOptional calls
+// on the individual natives (that only prevents a native-binding failure, it doesn't override
+// this separate, stronger extension-level requirement flag).
+#undef REQUIRE_EXTENSIONS
 #include <SteamWorks>
 
 #include "elo_ranking.inc"
@@ -122,6 +130,19 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	MarkNativeAsOptional("SoccerMod_GetCardAttributes");
 	MarkNativeAsOptional("SoccerMod_GetMatchStatBreakdown");
 	MarkNativeAsOptional("SoccerMod_GetTopPlayersByPoints");
+
+	// SteamWorks.inc's own SharedPlugin marker only sets required=0 (not a hard extension
+	// dependency) - but each individual native it declares is still implicitly REQUIRED unless
+	// explicitly marked optional too, same rule as everything else on this page. Without this,
+	// the whole plugin refuses to load ("Required extension SteamWorks... not running") the
+	// moment the SteamWorks extension isn't installed - defeating the entire point of this being
+	// an optional feature. Only marking the handful this plugin actually calls.
+	MarkNativeAsOptional("SteamWorks_CreateHTTPRequest");
+	MarkNativeAsOptional("SteamWorks_SetHTTPCallbacks");
+	MarkNativeAsOptional("SteamWorks_SetHTTPRequestContextValue");
+	MarkNativeAsOptional("SteamWorks_SendHTTPRequest");
+	MarkNativeAsOptional("SteamWorks_GetHTTPResponseBodySize");
+	MarkNativeAsOptional("SteamWorks_GetHTTPResponseBodyData");
 	return APLRes_Success;
 }
 
@@ -786,7 +807,7 @@ public Action Timer_EloProcessApiQueue(Handle timer)
 	return Plugin_Continue;
 }
 
-public int EloHttp_OnPlayerSummaries(Handle request, any data, bool failure, bool requestSuccessful, EHTTPStatusCode statusCode)
+public int EloHttp_OnPlayerSummaries(Handle request, bool failure, bool requestSuccessful, EHTTPStatusCode statusCode, any data)
 {
 	ArrayList batch = view_as<ArrayList>(data);
 
