@@ -95,8 +95,8 @@ int KickoffWallSet				= 1;
 int first12Set					= 0;
 int OTCountSet					= 1;
 int OTFinalSet					= 1;
-int pcGrassSet[MAXPLAYERS+1] 	= {0, ...};
-int pcShoutSet[MAXPLAYERS+1] 	= {0, ...};
+int pcGrassSet[MAXPLAYERS+1] 	= {1, ...};
+int pcShoutSet[MAXPLAYERS+1] 	= {1, ...};
 
 // STRINGS
 char changeSetting[MAXPLAYERS + 1][32];
@@ -160,6 +160,9 @@ int capT				= 0;
 int capPicksLeft		= 0;
 int capnr				= 0;
 int nrhelper			= 0;
+int capFirstPickCT		= 0;	// elo_ranking: the auto-assigned first-picker on CT when ELO decides pick order
+int capFirstPickT		= 0;	// elo_ranking: same for T
+ConVar cv_EloCapTiebreakPct;	// elo_ranking: created by elo_ranking.smx, fetched via FindConVar in OnAllPluginsLoaded
 
 // STRINGS
 char capweapon[32]		="knife";
@@ -402,9 +405,6 @@ char totalpausetime[32];
 
 // ConVars
 ConVar g_hostname;
-ConVar cv_EloCapTiebreakPct;   // created by elo_ranking.smx, fetched via FindConVar in OnAllPluginsLoaded
-int capFirstPickCT;            // moved from the old elo.sp - cap.sp sets these, and passes them to
-int capFirstPickT;             // Elo_CheckHalftimeSwap() as params now that they're separate plugins
 
 // FLOATS
 float hostname_update_time		= 1.0;
@@ -514,6 +514,9 @@ float ballspawn_pos[3];
 
 // INTEGER
 int spawnballpos 				= -1;
+
+// STRING
+char spawnModelBall[128] = "models/soccer_mod/ball_2011.mdl";
 
 
 // **************************************************** SPRINT ***************************************************
