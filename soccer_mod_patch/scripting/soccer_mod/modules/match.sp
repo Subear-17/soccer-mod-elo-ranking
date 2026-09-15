@@ -1882,6 +1882,8 @@ public Action DelayMatchEnd(Handle timer)
 	LogMessage("Final score: %s %i - %i %s", custom_name_ct, matchScoreCT, matchScoreT, custom_name_t);
 
 	AddMatchStat("add");
+	if (GetFeatureStatus(FeatureType_Native, "Elo_OnMatchEnd") == FeatureStatus_Available)
+		Elo_OnMatchEnd(matchScoreCT > matchScoreT, matchScoreT > matchScoreCT);
 	//ShowManOfTheMatch();
 	ShowTop3(true);
 	MatchReset();
@@ -1955,7 +1957,9 @@ public void MatchStart(int client)
 		matchStart = true;
 		matchKickOffTaken = true;
 		matchToss = GetRandomInt(2, 3);
-		Elo_OnMatchStart();
+
+		// elo_ranking (optional): snapshots the current roster/format for rating at match end.
+		if (GetFeatureStatus(FeatureType_Native, "Elo_OnMatchStart") == FeatureStatus_Available) Elo_OnMatchStart();
 
 		MatchInfoFunction();
 		int infonum;	
@@ -2114,7 +2118,8 @@ public void MatchStop(int client)
 		if (matchValid)
 		{
 			AddMatchStat("add");
-			Elo_OnMatchEnd(matchScoreCT > matchScoreT, matchScoreT > matchScoreCT);
+			if (GetFeatureStatus(FeatureType_Native, "Elo_OnMatchEnd") == FeatureStatus_Available)
+				Elo_OnMatchEnd(matchScoreCT > matchScoreT, matchScoreT > matchScoreCT);
 		}
 		else AddMatchStat("reset");
 		MatchReset();
@@ -2188,10 +2193,14 @@ public void EndStoppageTime()
 			
 			//print current match top3
 			ShowTop3(false);
-
+			
 			FreezeAll();
 			matchTimer = CreateTimer(0.0, MatchPeriodBreakTimer, matchPeriodBreakLength);
-			Elo_CheckHalftimeSwap(matchScoreCT, matchScoreT, capCT, capT, capFirstPickCT, capFirstPickT);
+
+			// elo_ranking (optional): if the score gap is large, proposes an ELO-balanced player
+			// swap for the second half and lets the pitch vote on it.
+			if (GetFeatureStatus(FeatureType_Native, "Elo_CheckHalftimeSwap") == FeatureStatus_Available)
+				Elo_CheckHalftimeSwap(matchScoreCT, matchScoreT, capCT, capT, capFirstPickCT, capFirstPickT);
 		}
 		else
 		{
@@ -2234,7 +2243,8 @@ public void EndStoppageTime()
 				LogMessage("Final score: %s %i - %i %s", custom_name_ct, matchScoreCT, matchScoreT, custom_name_t);
 
 				AddMatchStat("add");
-				Elo_OnMatchEnd(matchScoreCT > matchScoreT, matchScoreT > matchScoreCT);
+				if (GetFeatureStatus(FeatureType_Native, "Elo_OnMatchEnd") == FeatureStatus_Available)
+					Elo_OnMatchEnd(matchScoreCT > matchScoreT, matchScoreT > matchScoreCT);
 				//ShowManOfTheMatch();
 				ShowTop3(true);
 				MatchReset();

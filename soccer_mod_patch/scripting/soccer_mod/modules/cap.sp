@@ -3,8 +3,6 @@
 // ************************************************************************************************************
 public void CapOnPluginStart()
 {
-	capFirstPickCT = 0;
-	capFirstPickT = 0;
 }
 
 public void CapEventPlayerDeath(Event event)
@@ -75,13 +73,10 @@ public void CapEventRoundEnd(Event event)
 // **************************************************************************************************************
 // ************************************************** CAP MENU **************************************************
 // **************************************************************************************************************
-bool capForceKnifeMode = false;
-
 public void OpenCapMenu(int client)
 {
-	char capString[48];
-	if (capForceKnifeMode) Format(capString, sizeof(capString), "Start cap fight (knife - forced)");
-	else Format(capString, sizeof(capString), "Start cap fight (ELO-based)");
+	char capString[32];
+	Format(capString, sizeof(capString), "Start cap fight (%s)", capweapon);
 	Menu menu = new Menu(CapMenuHandler);
 
 	menu.SetTitle("Soccer - Admin - Cap");
@@ -91,12 +86,7 @@ public void OpenCapMenu(int client)
 	menu.AddItem("random", "Add random player");
 
 	menu.AddItem("start", capString);
-
-	char modeString[48];
-	if (capForceKnifeMode) Format(modeString, sizeof(modeString), "Cap mode: Force knife duel (click for ELO)");
-	else Format(modeString, sizeof(modeString), "Cap mode: ELO-based (click to force knife)");
-	menu.AddItem("elomode", modeString);
-
+	
 	menu.AddItem("capweap", "Weapon selection");
 	
 	//menu.AddItem("autocap", "[BETA] Auto Cap");
@@ -121,11 +111,6 @@ public int CapMenuHandler(Menu menu, MenuAction action, int client, int choice)
 			if (StrEqual(menuItem, "spec"))		 CapPutAllToSpec(client);
 			else if (StrEqual(menuItem, "random"))  CapAddRandomPlayer(client);
 			else if (StrEqual(menuItem, "capweap"))	OpenWeaponMenu(client);
-			else if (StrEqual(menuItem, "elomode"))
-			{
-				capForceKnifeMode = !capForceKnifeMode;
-				CPrintToChat(client, "{%s}[%s] {%s}Cap mode set to: %s", prefixcolor, prefix, textcolor, capForceKnifeMode ? "Force knife duel" : "ELO-based");
-			}
 			else if (StrEqual(menuItem, "start"))
 			{
 				CapStartFight(client);
@@ -302,10 +287,6 @@ public int CapPickMenuHandler(Menu menu, MenuAction action, int client, int choi
 			GetClientAuthId(target, AuthId_Engine, targetSteamid, sizeof(targetSteamid));
 			capPicksLeft--;
 
-			// remember each captain's very first pick - protected from halftime swaps later
-			if (client == capCT && capFirstPickCT == 0) capFirstPickCT = target;
-			else if (client == capT && capFirstPickT == 0) capFirstPickT = target;
-
 			if (client == capCT)
 			{
 				int team = GetClientTeam(capCT);
@@ -313,7 +294,7 @@ public int CapPickMenuHandler(Menu menu, MenuAction action, int client, int choi
 				if(GetClientMenu(target) != MenuSource_None)
 				{
 					CancelClientMenu(target, false);
-					InternalShowMenu(target, "\10", 1); 
+					InternalShowMenu(target, "\10", 1);
 				}
 
 				for (int player = 1; player <= MaxClients; player++)
@@ -322,6 +303,10 @@ public int CapPickMenuHandler(Menu menu, MenuAction action, int client, int choi
 				}
 
 				LogMessage("%N <%s> has picked %N <%s>", client, steamid, target, targetSteamid);
+
+				// elo_ranking: remembers each side's very first pick, so the halftime rebalance
+				// vote never proposes swapping out someone's opening pick.
+				if (capFirstPickCT == 0) capFirstPickCT = target;
 
 				capPicker = capT;
 				if (capPicksLeft > 0) OpenCapPickMenu(capT);
@@ -343,6 +328,9 @@ public int CapPickMenuHandler(Menu menu, MenuAction action, int client, int choi
 
 				LogMessage("%N <%s> has picked %N <%s>", client, steamid, target, targetSteamid);
 
+				// elo_ranking: same as the CT branch above.
+				if (capFirstPickT == 0) capFirstPickT = target;
+
 				capPicker = capCT;
 				if (capPicksLeft > 0) OpenCapPickMenu(capCT);
 			}
@@ -363,11 +351,6 @@ public int CapPickMenuHandler(Menu menu, MenuAction action, int client, int choi
 // *******************************************************************************************************************
 public void OpenCapPositionMenu(int client)
 {
-	// A stale/competing menu handle (e.g. the engine's own team-join menu still technically
-	// "open" right after connect) can silently block a brand new menu from displaying - same
-	// fix already used elsewhere in this codebase (see the pick-menu team assignment code).
-	if (GetClientMenu(client) != MenuSource_None) CancelClientMenu(client, false);
-
 	KeyValues keygroup = new KeyValues("capPositions");
 	keygroup.ImportFromFile(pathCapPositionsFile);
 	char langString[64], langString1[64], langString2[64];
@@ -377,11 +360,7 @@ public void OpenCapPositionMenu(int client)
 
 	Menu menu = new Menu(CapPositionMenuHandler);
 
-	int curCount = keygroup.GetNum("gk", 0) + keygroup.GetNum("def", 0) + keygroup.GetNum("mid", 0) + keygroup.GetNum("wing", 0);
-	char titleString[80];
-	if (curCount >= 2) Format(titleString, sizeof(titleString), "Positions - %i/2 selected, you're pick-eligible", curCount);
-	else Format(titleString, sizeof(titleString), ">>> SELECT AT LEAST 2 (you have %i/2) <<<", curCount);
-	menu.SetTitle(titleString);
+	menu.SetTitle("Soccer Mod - Cap - Positions");
 
 	int keyValue = keygroup.GetNum("gk", 0);
 	Format(langString1, sizeof(langString1), "Goalkeeper", client);
@@ -390,26 +369,40 @@ public void OpenCapPositionMenu(int client)
 	Format(langString, sizeof(langString), "%s: %s", langString1, langString2);
 	menu.AddItem("gk", langString);
 
-	keyValue = keygroup.GetNum("def", 0);
-	Format(langString1, sizeof(langString1), "Defender", client);
+	keyValue = keygroup.GetNum("lb", 0);
+	Format(langString1, sizeof(langString1), "Left back", client);
 	if (keyValue) Format(langString2, sizeof(langString2), "Yes", client);
 	else Format(langString2, sizeof(langString2), "No", client);
 	Format(langString, sizeof(langString), "%s: %s", langString1, langString2);
-	menu.AddItem("def", langString);
+	menu.AddItem("lb", langString);
 
-	keyValue = keygroup.GetNum("mid", 0);
+	keyValue = keygroup.GetNum("rb", 0);
+	Format(langString1, sizeof(langString1), "Right back", client);
+	if (keyValue) Format(langString2, sizeof(langString2), "Yes", client);
+	else Format(langString2, sizeof(langString2), "No", client);
+	Format(langString, sizeof(langString), "%s: %s", langString1, langString2);
+	menu.AddItem("rb", langString);
+
+	keyValue = keygroup.GetNum("mf", 0);
 	Format(langString1, sizeof(langString1), "Midfielder", client);
 	if (keyValue) Format(langString2, sizeof(langString2), "Yes", client);
 	else Format(langString2, sizeof(langString2), "No", client);
 	Format(langString, sizeof(langString), "%s: %s", langString1, langString2);
-	menu.AddItem("mid", langString);
+	menu.AddItem("mf", langString);
 
-	keyValue = keygroup.GetNum("wing", 0);
-	Format(langString1, sizeof(langString1), "Wing", client);
+	keyValue = keygroup.GetNum("lw", 0);
+	Format(langString1, sizeof(langString1), "Left wing", client);
 	if (keyValue) Format(langString2, sizeof(langString2), "Yes", client);
 	else Format(langString2, sizeof(langString2), "No", client);
 	Format(langString, sizeof(langString), "%s: %s", langString1, langString2);
-	menu.AddItem("wing", langString);
+	menu.AddItem("lw", langString);
+
+	keyValue = keygroup.GetNum("rw", 0);
+	Format(langString1, sizeof(langString1), "Right wing", client);
+	if (keyValue) Format(langString2, sizeof(langString2), "Yes", client);
+	else Format(langString2, sizeof(langString2), "No", client);
+	Format(langString, sizeof(langString), "%s: %s", langString1, langString2);
+	menu.AddItem("rw", langString);
 
 	keyValue = keygroup.GetNum("spec", 0);
 	Format(langString1, sizeof(langString1), "Spec only", client);
@@ -653,12 +646,72 @@ public void CapStartFight(int client)
 		
 		capFightStarted = true;
 		capPicksLeft = (matchMaxPlayers - 1) * 2;
-		capFirstPickCT = 0;
-		capFirstPickT = 0;
+		capFirstPickCT = 0;	// elo_ranking
+		capFirstPickT = 0;	// elo_ranking
 
 		bool noPos[MAXPLAYERS+1] = false;
 		int posnr[MAXPLAYERS+1];
-		int ctClient = 0, tClient = 0;
+
+		// elo_ranking (optional): if loaded, the two candidate captains' ELO decides who picks
+		// first, skipping the knife duel - unless they're close enough in rating that it falls
+		// back to the classic duel below. Entirely inert if elo_ranking.smx isn't installed.
+		bool eloAutoPicked = false;
+		if (GetFeatureStatus(FeatureType_Native, "Elo_GetCapRating") == FeatureStatus_Available
+			&& cv_EloCapTiebreakPct != null)
+		{
+			int ctClient = 0, tClient = 0;
+			for (int player = 1; player <= MaxClients; player++)
+			{
+				if (!IsClientInGame(player) || !IsClientConnected(player)) continue;
+				int team = GetClientTeam(player);
+				if (team == 3) ctClient = player;
+				else if (team == 2) tClient = player;
+			}
+
+			if (ctClient > 0 && tClient > 0)
+			{
+				float eloCT = Elo_GetCapRating(ctClient);
+				float eloT = Elo_GetCapRating(tClient);
+				float avgElo = (eloCT + eloT) / 2.0;
+				float diffPct = (avgElo > 0.0) ? (FloatAbs(eloCT - eloT) / avgElo * 100.0) : 0.0;
+
+				if (diffPct > cv_EloCapTiebreakPct.FloatValue)
+				{
+					int firstPicker; char firstPickerSide[8];
+					if (eloCT < eloT)
+					{
+						capCT = ctClient;
+						capT = tClient;
+						firstPicker = ctClient;
+						strcopy(firstPickerSide, sizeof(firstPickerSide), "CT");
+					}
+					else
+					{
+						capT = tClient;
+						capCT = ctClient;
+						firstPicker = tClient;
+						strcopy(firstPickerSide, sizeof(firstPickerSide), "T");
+					}
+
+					CPrintToChatAll("{%s}[%s] {%s}%s cap has the lowest ELO and will pick first.", prefixcolor, prefix, textcolor, firstPickerSide);
+
+					capPicker = firstPicker;
+					eloAutoPicked = true;
+				}
+				else
+				{
+					CPrintToChatAll("{%s}[%s] {%s}CT ELO %.0f vs T ELO %.0f (%.1f%% apart, within the %.1f%% tiebreak) - deciding first pick with the knife duel.", prefixcolor, prefix, textcolor, eloCT, eloT, diffPct, cv_EloCapTiebreakPct.FloatValue);
+				}
+			}
+		}
+
+		if (!eloAutoPicked)
+		{
+			CreateTimer(0.0, TimerCapFightCountDown, 3);
+			CreateTimer(1.0, TimerCapFightCountDown, 2);
+			CreateTimer(2.0, TimerCapFightCountDown, 1);
+			CreateTimer(3.0, TimerCapFightCountDownEnd);
+		}
 
 		KeyValues keygroup = new KeyValues("capPositions");
 		keygroup.ImportFromFile(pathCapPositionsFile);
@@ -669,120 +722,61 @@ public void CapStartFight(int client)
 			{
 				char playerSteamid[32];
 				GetClientAuthId(player, AuthId_Engine, playerSteamid, sizeof(playerSteamid));
-
-				int team = GetClientTeam(player);
-				if (team == 3) ctClient = player;
-				else if (team == 2) tClient = player;
-
-				if (team > 1  && IsPlayerAlive(player)) SetEntityMoveType(player, MOVETYPE_NONE);
+				
+				if (GetClientTeam(player) > 1  && IsPlayerAlive(player)) SetEntityMoveType(player, MOVETYPE_NONE);
 				else
 				{
 					noPos[player] = false;
-
-
+					
+					
 					keygroup.JumpToKey(playerSteamid, true);
 
 					int gk = keygroup.GetNum("gk", 0);
-					int def = keygroup.GetNum("def", 0);
-					int mid = keygroup.GetNum("mid", 0);
-					int wing = keygroup.GetNum("wing", 0);
+					int lb = keygroup.GetNum("lb", 0);
+					int rb = keygroup.GetNum("rb", 0);
+					int mf = keygroup.GetNum("mf", 0);
+					int lw = keygroup.GetNum("lw", 0);
+					int rw = keygroup.GetNum("rw", 0);
 					int spec = keygroup.GetNum("spec", 0);
-					int posCount = gk + def + mid + wing;
 
-					// same >=2-positions rule as the pick menu - nag anyone still short here too
-					if (spec == 1 || posCount < 2)
+					if (spec == 1 || (!gk && !lb && !rb && !mf && !lw && !rw))
 					{
-						noPos[player] = true;
+						noPos[player] = true; // array + clear array function
 					}
 				}
-
+				
 				posnr[player] = ImportJoinNumber(playerSteamid)
 			}
 		}
 
 		keygroup.Close();
-
-		// prompt EVERYONE still under the position minimum, not just whoever started the fight
-		for (int player = 1; player <= MaxClients; player++)
+		
+		if (noPos[client] == true) 
 		{
-			if (IsClientInGame(player) && IsClientConnected(player) && noPos[player] == true)
-			{
-				CPrintToChat(player, "{%s}[%s] {%s}Please select at least 2 positions to be pick-eligible", prefixcolor, prefix, textcolor);
-				OpenCapPositionMenu(player);
-			}
+			CPrintToChat(client, "{%s}[%s] {%s}Please set your position to help the caps with picking", prefixcolor, prefix, textcolor);
+			OpenCapPositionMenu(client);
 		}
 
 		for (int player = 1; player <= MaxClients; player++)
 		{
-			if (IsClientInGame(player) && IsClientConnected(player))
+			if (IsClientInGame(player) && IsClientConnected(player)) 
 			{
-				//PrintToServer("%N : %i", player, posnr[player]);
+				//PrintToServer("%N : %i", player, posnr[player]); 
 				CPrintToChat(player, "{%s}[%s] {%s}%N has started a cap fight", prefixcolor, prefix, textcolor, client);
 				CPrintToChat(player, "{%s}[%s] {%s}You joined this cap on position number {%s}%i.", prefixcolor, prefix, textcolor, prefixcolor, posnr[player]);
 			}
 		}
 
-		HostName_Change_Status("Capfight");
+		if (eloAutoPicked)
+		{
+			HostName_Change_Status("Picking");
+			OpenCapPickMenu(capPicker);
+		}
+		else HostName_Change_Status("Capfight");
 
 		char steamid[32];
 		GetClientAuthId(client, AuthId_Engine, steamid, sizeof(steamid));
 		LogMessage("%N <%s> has started a cap fight", client, steamid);
-
-		// ELO decides who picks first: lowest 6v6 ELO auto-picks, unless the two candidate
-		// captains are within the configured tiebreak percentage of each other, in which case
-		// fall back to the traditional knife duel (capweapon).
-		bool useKnifeDuel = true;
-
-		if (ctClient > 0 && tClient > 0 && !capForceKnifeMode)
-		{
-			float eloCT = Elo_GetCapRating(ctClient);
-			float eloT = Elo_GetCapRating(tClient);
-			float avgElo = (eloCT + eloT) / 2.0;
-			float diffPct = (avgElo > 0.0) ? (FloatAbs(eloCT - eloT) / avgElo * 100.0) : 0.0;
-
-			if (diffPct > cv_EloCapTiebreakPct.FloatValue)
-			{
-				useKnifeDuel = false;
-
-				int firstPicker; char firstPickerSide[8];
-				if (eloCT < eloT)
-				{
-					capCT = ctClient;
-					capT = tClient;
-					firstPicker = ctClient;
-					strcopy(firstPickerSide, sizeof(firstPickerSide), "CT");
-				}
-				else
-				{
-					capT = tClient;
-					capCT = ctClient;
-					firstPicker = tClient;
-					strcopy(firstPickerSide, sizeof(firstPickerSide), "T");
-				}
-
-				CPrintToChatAll("{%s}[%s] {%s}%s cap has the lowest ELO and will pick first.", prefixcolor, prefix, textcolor, firstPickerSide);
-
-				capFightStarted = false;
-				capPicker = firstPicker;
-				if (tempSprint) bSPRINT_ENABLED = 1;
-				UnfreezeAll();
-
-				HostName_Change_Status("Picking");
-				OpenCapPickMenu(firstPicker);
-			}
-			else
-			{
-				CPrintToChatAll("{%s}[%s] {%s}CT ELO %.0f vs T ELO %.0f (%.1f%% apart, within the %.1f%% tiebreak) - deciding first pick with the knife duel.", prefixcolor, prefix, textcolor, eloCT, eloT, diffPct, cv_EloCapTiebreakPct.FloatValue);
-			}
-		}
-
-		if (useKnifeDuel)
-		{
-			CreateTimer(0.0, TimerCapFightCountDown, 3);
-			CreateTimer(1.0, TimerCapFightCountDown, 2);
-			CreateTimer(2.0, TimerCapFightCountDown, 1);
-			CreateTimer(3.0, TimerCapFightCountDownEnd);
-		}
 	}
 	else CPrintToChat(client, "{%s}[%s] {%s}Cap fight already started", prefixcolor, prefix, textcolor);
 }
@@ -806,51 +800,56 @@ public void CapCreatePickMenu(int client)
 				char playerid[4];
 				IntToString(player, playerid, sizeof(playerid));
 
+				char playerName[MAX_NAME_LENGTH];
+				GetClientName(player, playerName, sizeof(playerName));
+
 				char steamid[32];
 				GetClientAuthId(player, AuthId_Engine, steamid, sizeof(steamid));
 
-				char liveName[MAX_NAME_LENGTH], playerName[MAX_NAME_LENGTH];
-				GetClientName(player, liveName, sizeof(liveName));
-				Elo_GetDisplayName(steamid, liveName, playerName, sizeof(playerName));
+				// elo_ranking (optional): shows the player's admin-set nickname (if any) and
+				// their 6v6 ELO next to their name, so caps can pick with skill visible. No-op
+				// (playerName stays exactly as GetClientName gave it) if the plugin isn't loaded.
+				int posElo = -1;
+				if (GetFeatureStatus(FeatureType_Native, "Elo_GetDisplayName") == FeatureStatus_Available)
+				{
+					char displayName[MAX_NAME_LENGTH];
+					Elo_GetDisplayName(steamid, playerName, displayName, sizeof(displayName));
+					strcopy(playerName, sizeof(playerName), displayName);
+				}
+				if (GetFeatureStatus(FeatureType_Native, "Elo_GetRating") == FeatureStatus_Available)
+				{
+					posElo = RoundToNearest(Elo_GetRating(steamid, "6v6"));
+				}
 
 				keygroup.JumpToKey(steamid, true);
 
-				int posGk = keygroup.GetNum("gk", 0);
-				int posDef = keygroup.GetNum("def", 0);
-				int posMid = keygroup.GetNum("mid", 0);
-				int posWing = keygroup.GetNum("wing", 0);
-				int posSpec = keygroup.GetNum("spec", 0);
-				int posCount = posGk + posDef + posMid + posWing;
-
 				char positions[32] = "";
-				if (posGk) Format(positions, sizeof(positions), "%s[GK]", positions);
-				if (posDef) Format(positions, sizeof(positions), "%s[DEF]", positions);
-				if (posMid) Format(positions, sizeof(positions), "%s[MID]", positions);
-				if (posWing) Format(positions, sizeof(positions), "%s[WING]", positions);
-				if (posSpec) Format(positions, sizeof(positions), "[SPEC ONLY]");
+				if (keygroup.GetNum("gk", 0)) Format(positions, sizeof(positions), "%s[GK]", positions);
+				if (keygroup.GetNum("lb", 0)) Format(positions, sizeof(positions), "%s[LB]", positions);
+				if (keygroup.GetNum("rb", 0)) Format(positions, sizeof(positions), "%s[RB]", positions);
+				if (keygroup.GetNum("mf", 0)) Format(positions, sizeof(positions), "%s[MF]", positions);
+				if (keygroup.GetNum("lw", 0)) Format(positions, sizeof(positions), "%s[LW]", positions);
+				if (keygroup.GetNum("rw", 0)) Format(positions, sizeof(positions), "%s[RW]", positions);
+				if (keygroup.GetNum("spec", 0)) Format(positions, sizeof(positions), "[SPEC ONLY]");
 
 				int posnr = ImportJoinNumber(steamid);
-				int posElo = RoundToNearest(Elo_GetRating(steamid, "6v6"));
 
 				char menuString[96];
-				if (positions[0]) Format(menuString, sizeof(menuString), "[%i] %s (%i) %s", posnr, playerName, posElo, positions);
-				else Format(menuString, sizeof(menuString), "[%i] %s (%i)", posnr, playerName, posElo);
+				if (posElo >= 0 && positions[0]) Format(menuString, sizeof(menuString), "[%i] %s (%i) %s", posnr, playerName, posElo, positions);
+				else if (posElo >= 0) Format(menuString, sizeof(menuString), "[%i] %s (%i)", posnr, playerName, posElo);
+				else if (positions[0]) Format(menuString, sizeof(menuString), "[%i] %s %s", posnr, playerName, positions);
+				else Format(menuString, sizeof(menuString), "[%i] %s", posnr, playerName);
 				//menuString = playerName;
-
-				// Must have selected at least 2 positions (and not be spec-only) to be pick-eligible at all.
-				bool positionEligible = (posSpec == 0 && posCount >= 2);
-
 				if(first12Set == 1)
 				{
-					if(posnr > 12 || !positionEligible)	menu.AddItem(playerid, menuString, ITEMDRAW_DISABLED);
+					if(posnr > 12)	menu.AddItem(playerid, menuString, ITEMDRAW_DISABLED);
 					else			menu.AddItem(playerid, menuString);
 				}
 				else if (first12Set == 2)
 				{
-					if(posnr > capnr || !positionEligible)	menu.AddItem(playerid, menuString, ITEMDRAW_DISABLED);
+					if(posnr > capnr)	menu.AddItem(playerid, menuString, ITEMDRAW_DISABLED);
 					else				menu.AddItem(playerid, menuString);
 				}
-				else if (!positionEligible) menu.AddItem(playerid, menuString, ITEMDRAW_DISABLED);
 				else				menu.AddItem(playerid, menuString);
 				keygroup.Rewind();
 			}

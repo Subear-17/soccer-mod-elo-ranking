@@ -101,14 +101,18 @@ public void NukeClient(int client, bool bLog, int iMatches, const char[] sLog)
 {
 	if(IsValidClient(client))
 	{
-		Elo_InvalidateMatch(matchStarted);
+		// elo_ranking (optional): an AFK kick mid-match invalidates the whole match for rating -
+		// no-op if the plugin isn't loaded.
+		if (GetFeatureStatus(FeatureType_Native, "Elo_InvalidateMatch") == FeatureStatus_Available)
+			Elo_InvalidateMatch(matchStarted);
+
 		KickClient(client, "You were kicked for being AFK or failed to solve the captcha");
 	}
 }
 
 // ************************************************ COMPARE **********************************************************
 
-stock bool bVectorsEqual(float v1[3], float v2[3])
+stock bool bVectorsEqual(float[3] v1, float[3] v2)
 {
 	return (v1[0] == v2[0] && v1[1] == v2[1] && v1[2] == v2[2]);
 }
