@@ -23,8 +23,10 @@ public Plugin myinfo =
 // ****************************************** SOCCER MOD - ELO RATING ******************************************
 // ************************************************************************************************************
 // Outcome-based rating system (win/loss only, never per-stat), designed 2026-09 with the community after
-// years of unbalanced caps. Stored OUTSIDE the game server's own volume (/mnt/elo, a Pterodactyl mount) so
-// ratings survive server reinstalls/migrations. Keyed by SteamID64, never by display name.
+// years of unbalanced caps. Data path is configurable via sm_soccermod_elo_datapath - see
+// RefreshEloDataPaths() below - so it can optionally live outside the game server's own volume
+// (e.g. a separate mount) to survive server reinstalls/migrations. Keyed by SteamID64, never by
+// display name.
 //
 // Three independent rating pools: "2v2", "3v3", "6v6". A match only counts if it meets format-specific
 // minimums (roster size + duration) and wasn't AFK-kick-invalidated.

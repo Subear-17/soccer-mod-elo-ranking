@@ -12,6 +12,14 @@ vote on a rebalancing swap at halftime instead of just grinding out a blowout.
 The ELO leaderboard and player cards grew out of that — once skill is being
 tracked to make picks fairer, it's a small step to also show it.
 
+## ⚠️ Status: untested outside the original server
+
+This has only been verified to *compile* cleanly against stock SoMoE-19 - it
+has not yet been run on a live server other than the one it was built for.
+Expect rough edges. If something breaks, behaves oddly, or just looks wrong,
+please open an issue on this repo (or reach out directly) - bug reports are
+very welcome and genuinely useful at this stage.
+
 ## How this is built
 
 `soccer_mod_patch/` in this repo is **stock SoMoE-19** (pulled straight from
