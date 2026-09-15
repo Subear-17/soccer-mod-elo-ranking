@@ -1,9 +1,40 @@
 # ELO Ranking for Soccer Mod (SoMoE-19)
 
-An add-on SourceMod plugin that adds a full ELO ranking system on top of
+A SourceMod plugin that adds a full ELO ranking system on top of
 [MK99MA's SoMoE-19](https://github.com/MK99MA/SoMoE-19) fork of the CS:S Soccer Mod.
-This repo adds a new plugin plus a small set of hooks into soccer_mod's own
-files — it does not replace or fork soccer_mod itself.
+
+**Why this exists:** caps (pickup scrims) kept ending up lopsided — one
+captain's pick would stack a team and the game was decided before it really
+started. This plugin was built to make caps fairer over the length of a
+match: captains are picked based on skill instead of chance where possible,
+and if a game still gets badly one-sided, the players on the pitch get to
+vote on a rebalancing swap at halftime instead of just grinding out a blowout.
+The ELO leaderboard and player cards grew out of that — once skill is being
+tracked to make picks fairer, it's a small step to also show it.
+
+## How this is built
+
+`soccer_mod_patch/` in this repo is **stock SoMoE-19** (pulled straight from
+[MK99MA's GitHub](https://github.com/MK99MA/SoMoE-19)) with a small, clearly
+marked set of hooks added — every addition is commented and searchable
+(`elo_ranking`, `Elo_`, or `ELO`). It is not a wholesale rewrite and it does
+not touch anything unrelated to ELO.
+
+**Fully optional, fully reversible.** `elo_ranking.smx` is never a hard
+requirement for soccer_mod — every hook checks whether the plugin is actually
+loaded before doing anything. Install it and cap-picking becomes ELO-aware;
+remove `elo_ranking.smx` again and soccer_mod falls straight back to normal
+behavior (plain knife duel, no rating, no halftime vote) with no errors and
+nothing broken. You can toggle it on and off freely.
+
+**If you've customized `soccer_mod.sp`, `globals.sp`, `cap.sp`, `match.sp`,
+or `afkkicker.sp` yourself:** don't overwrite them wholesale — you'd lose
+your own changes along with anyone else's on top of stock SoMoE-19. Open a
+diff against the stock versions instead and merge in just the ELO-marked
+lines by hand.
+
+**Always back up your existing `scripting/` folder before replacing
+anything**, just in case.
 
 ## Features
 
@@ -36,41 +67,47 @@ files — it does not replace or fork soccer_mod itself.
 
 ## Requirements
 
-This plugin is built against **SoMoE-19's own `soccer_mod.sp`/`cap.sp`/
-`match.sp`/`afkkicker.sp`/`stats.sp`** — it calls into those files directly to
-know when a cap match starts/ends and to read live match stats. It will not
-do anything useful on a different soccer_mod fork unless you manually add the
-same hook calls (see `soccer_mod_patch/` below for exactly what was changed).
-
 - SourceMod 1.11+
-- MK99MA's SoMoE-19 soccer_mod
+- SoMoE-19 soccer_mod
 
 ## Installation
 
-1. **Install the plugin itself:**
-   - Copy `elo_ranking.sp` into `addons/sourcemod/scripting/`
-   - Copy `elo_ranking.inc` into `addons/sourcemod/scripting/include/`
-   - Compile `elo_ranking.sp` and drop the resulting `elo_ranking.smx` into
-     `addons/sourcemod/plugins/`
+**Step 0 — back up first.** Copy your entire
+`addons/sourcemod/scripting/soccer_mod.sp` file and `soccer_mod/` folder
+somewhere safe before touching anything. If something goes wrong you can
+always put your originals back.
 
-2. **Update your soccer_mod install to call into it:**
-   - The `soccer_mod_patch/` folder contains complete, ready-to-use versions
-     of the 6 SoMoE-19 files this plugin needs: `soccer_mod.sp`, and inside
-     `soccer_mod/`: `globals.sp`, `modules/cap.sp`, `modules/match.sp`,
-     `modules/afkkicker.sp`, `modules/stats.sp`.
-   - **If you haven't customized these files yourself:** just copy them over
-     your existing ones and recompile `soccer_mod.sp`.
-   - **If you HAVE customized any of these files:** don't overwrite them —
-     open a diff between your version and the one in this repo, and manually
-     merge in just the ELO-related additions (they're all clearly commented,
-     search for "elo_ranking" or "Elo_" in each file).
-   - Recompile `soccer_mod.sp` and replace your `soccer_mod.smx`.
+**Step 1 — install the ELO plugin itself:**
 
-3. Restart your server (or reload both plugins). You should see both
-   `Soccer Mod - ELO Ranking` and your soccer_mod plugin listed with no
-   errors in `sm plugins list`.
+1. Copy `elo_ranking.sp` into `addons/sourcemod/scripting/`
+2. Copy `elo_ranking.inc` into `addons/sourcemod/scripting/include/`
+3. Compile `elo_ranking.sp` (using your SourceMod's `spcomp`/`spcomp64`) and
+   put the resulting `elo_ranking.smx` into `addons/sourcemod/plugins/`
 
-4. Type `!elo` in chat to open the menu.
+**Step 2 — bring in the soccer_mod files ELO needs to hook into:**
+
+The `soccer_mod_patch/scripting/` folder in this repo mirrors your server's
+own `addons/sourcemod/scripting/` folder. Copy these 5 files over your
+existing ones, in the same relative locations:
+
+- `soccer_mod.sp`
+- `soccer_mod/globals.sp`
+- `soccer_mod/modules/cap.sp`
+- `soccer_mod/modules/match.sp`
+- `soccer_mod/modules/afkkicker.sp`
+
+Then recompile `soccer_mod.sp` and replace your `soccer_mod.smx` with the
+freshly compiled one.
+
+**Step 3 — restart:**
+
+Restart your server (or reload both plugins). Run `sm plugins list` in the
+server console — you should see both `Soccer Mod - ELO Ranking` and your
+soccer_mod plugin listed with no errors next to either of them.
+
+**Step 4 — use it:**
+
+Type `!elo` in chat to open the menu. That's it.
 
 ## Configuration (ConVars)
 
@@ -87,6 +124,10 @@ same hook calls (see `soccer_mod_patch/` below for exactly what was changed).
   running soccer_mod before installing this.
 - Unranked data comes straight from your existing `soccer_mod_public_stats`
   table, so it reflects your server's real history from day one.
+- `soccer_mod_patch/` was built and tested against SoMoE-19's `master` branch.
+  If you're on an older tagged release, the surrounding code may have shifted
+  slightly - the ELO-marked lines are still the same, just double-check they
+  land in a sensible spot when merging by hand.
 - This is an early, actively-developed plugin — feedback and issues welcome.
 
 ## Credits
