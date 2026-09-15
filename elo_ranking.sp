@@ -8,15 +8,6 @@
 #include <cstrike>
 #include <morecolors>
 
-// <sourcemod> itself unconditionally #defines REQUIRE_EXTENSIONS (see core.inc) as the default
-// for anything included afterward - so without this #undef, SteamWorks.inc's own SharedPlugin-
-// style Extension marker would compile with required=1, making the WHOLE plugin refuse to load
-// the instant the SteamWorks extension isn't installed, regardless of MarkNativeAsOptional calls
-// on the individual natives (that only prevents a native-binding failure, it doesn't override
-// this separate, stronger extension-level requirement flag).
-#undef REQUIRE_EXTENSIONS
-#include <SteamWorks>
-
 #include "elo_ranking.inc"
 
 public Plugin myinfo =
@@ -103,16 +94,6 @@ Menu   eloSwapMenu;
 // cvar-backed
 ConVar cv_EloCapTiebreakPct;
 ConVar cv_Elo6v6MinMinutes;
-ConVar cv_EloSteamApiKey;
-
-// Steam Web API name lookup (optional - only runs at all if sm_soccermod_elo_steamapikey is set).
-// The ONLY way a historic player (someone in soccer_mod's old stats who hasn't reconnected since
-// this plugin was installed) ever gets a real name instead of a raw SteamID - see EloGetDisplayName,
-// EloQueueSteamApiLookup, Timer_EloProcessApiQueue. Queued rather than looked up synchronously
-// because HTTP is inherently async and EloGetDisplayName is called on every single leaderboard row
-// render, so it must stay cheap.
-ArrayList g_EloApiQueue;
-#define ELO_API_BATCH_MAX 100 // Steam Web API's own documented limit for GetPlayerSummaries
 
 // ****************************************************************************************************
 // ******************************************** INIT / CVARS ********************************************
@@ -130,19 +111,6 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	MarkNativeAsOptional("SoccerMod_GetCardAttributes");
 	MarkNativeAsOptional("SoccerMod_GetMatchStatBreakdown");
 	MarkNativeAsOptional("SoccerMod_GetTopPlayersByPoints");
-
-	// SteamWorks.inc's own SharedPlugin marker only sets required=0 (not a hard extension
-	// dependency) - but each individual native it declares is still implicitly REQUIRED unless
-	// explicitly marked optional too, same rule as everything else on this page. Without this,
-	// the whole plugin refuses to load ("Required extension SteamWorks... not running") the
-	// moment the SteamWorks extension isn't installed - defeating the entire point of this being
-	// an optional feature. Only marking the handful this plugin actually calls.
-	MarkNativeAsOptional("SteamWorks_CreateHTTPRequest");
-	MarkNativeAsOptional("SteamWorks_SetHTTPCallbacks");
-	MarkNativeAsOptional("SteamWorks_SetHTTPRequestContextValue");
-	MarkNativeAsOptional("SteamWorks_SendHTTPRequest");
-	MarkNativeAsOptional("SteamWorks_GetHTTPResponseBodySize");
-	MarkNativeAsOptional("SteamWorks_GetHTTPResponseBodyData");
 	return APLRes_Success;
 }
 
@@ -154,13 +122,6 @@ public void OnPluginStart()
 	cv_EloDataPath = CreateConVar("sm_soccermod_elo_datapath", "",
 		"Custom absolute directory for ELO's data files. Leave empty (default) to use addons/sourcemod/data/elo_ranking/ - works out of the box on any server with zero setup. Only set this if you specifically want the data stored somewhere else (e.g. a separate mount that survives full server reinstalls).");
 	cv_EloDataPath.AddChangeHook(OnEloDataPathChanged);
-
-	cv_EloSteamApiKey = CreateConVar("sm_soccermod_elo_steamapikey", "",
-		"Optional free Steam Web API key (get one at https://steamcommunity.com/dev/apikey). When set, ELO ranking automatically looks up real Steam names for historic players who haven't reconnected since this plugin was installed, instead of showing a raw SteamID on the leaderboards. Leave empty to disable - everything else works exactly the same either way. Requires the SteamWorks extension.",
-		FCVAR_PROTECTED);
-
-	g_EloApiQueue = new ArrayList(ByteCountToCells(32));
-	CreateTimer(5.0, Timer_EloProcessApiQueue, _, TIMER_REPEAT);
 
 	// DANGEROUS BUG FIXED HERE (2026-09-10, take 2): both FileExists() AND a plain OpenFile(...,"r")
 	// probe false-negative on this absolute path specifically when called this early in plugin
@@ -190,23 +151,6 @@ public void OnPluginStart()
 	RegPluginLibrary("elo_ranking");
 
 	RegConsoleCmd("sm_elo", Cmd_Elo, "Opens the ELO ranking menu (chat trigger: !elo)");
-
-	// Loud and immediate, not just documented in the README - so an installer sees this the
-	// moment they load the plugin, in the same server console they're already watching for
-	// startup errors, rather than only discovering it later as an unexplained "why no names?"
-	// support question.
-	CreateTimer(3.0, Timer_EloWarnMissingApiKey);
-}
-
-public Action Timer_EloWarnMissingApiKey(Handle timer)
-{
-	char apiKey[64];
-	cv_EloSteamApiKey.GetString(apiKey, sizeof(apiKey));
-	if (apiKey[0] == '\0')
-	{
-		LogMessage("[elo_ranking] sm_soccermod_elo_steamapikey is not set - historic players will show raw SteamIDs on the leaderboards instead of real names. This is optional; see the README for how to get a free key.");
-	}
-	return Plugin_Stop;
 }
 
 public Action Cmd_Elo(int client, int args)
@@ -664,9 +608,15 @@ void EloGetDisplayName(const char[] steamid, const char[] liveName, char[] outNa
 	kv.JumpToKey(steamid, true);
 	char nickname[MAX_NAME_LENGTH];
 	kv.GetString("displayname", nickname, sizeof(nickname), "");
-	char apiName[MAX_NAME_LENGTH];
-	kv.GetString("apiname", apiName, sizeof(apiName), "");
-	bool apiChecked = (kv.GetNum("apinamechecked", 0) != 0);
+	// Fallback for players who aren't currently online and have no admin-set nickname: the last
+	// name they were actually seen connecting with, recorded automatically by EloRecordJoinName
+	// every time anyone joins. This is the ONLY way historic players ever get a real name instead
+	// of a raw SteamID - no external API involved, just what the server has already witnessed
+	// itself. A player who has never joined since this plugin started tracking still won't have
+	// one; there's no way around that without an external lookup, which this plugin deliberately
+	// doesn't do (see README).
+	char joinName[MAX_NAME_LENGTH];
+	kv.GetString("lastjoinname", joinName, sizeof(joinName), "");
 	delete kv;
 
 	// Pass "" for liveName when the player isn't currently connected and no live name could be
@@ -682,230 +632,10 @@ void EloGetDisplayName(const char[] steamid, const char[] liveName, char[] outNa
 		strcopy(outName, outSize, nickname);
 	else if (haveRealLiveName)
 		strcopy(outName, outSize, liveName);
-	else if (apiName[0] != '\0')
-		strcopy(outName, outSize, apiName);
+	else if (joinName[0] != '\0')
+		strcopy(outName, outSize, joinName);
 	else
-	{
 		strcopy(outName, outSize, steamid);
-		// Last resort: nothing else identifies this player at all, and we haven't tried the
-		// Steam Web API yet for them - queue it (async, see Timer_EloProcessApiQueue) so the
-		// NEXT time this menu is opened, a real name is there instead. No-op if no API key is
-		// configured.
-		if (!apiChecked) EloQueueSteamApiLookup(steamid);
-	}
-}
-
-void EloQueueSteamApiLookup(const char[] steamid)
-{
-	char apiKey[64];
-	cv_EloSteamApiKey.GetString(apiKey, sizeof(apiKey));
-	if (apiKey[0] == '\0') return; // feature is off unless a key is configured
-
-	if (g_EloApiQueue.FindString(steamid) != -1) return; // already queued, don't duplicate
-	if (g_EloApiQueue.Length >= 500) return; // sane upper bound, never grows unbounded
-
-	g_EloApiQueue.PushString(steamid);
-}
-
-// Converts a Steam3 ID ("[U:1:XXXXXXXXX]", the format GetClientAuthId(..., AuthId_Engine, ...)
-// returns and the format every steamid is keyed by throughout this file) into a SteamID64 decimal
-// string, via schoolbook decimal addition of the account ID onto the fixed universe/type/instance
-// base - needed because a SteamID64 (up to ~7.6*10^16) doesn't fit in Pawn's 32-bit cells or in a
-// double without losing precision, so this can't just be done with normal integer/float math.
-void EloSteamID3ToID64(const char[] steamid3, char[] outId64, int outSize)
-{
-	outId64[0] = '\0';
-
-	int colonPos = FindCharInString(steamid3, ':', true);
-	int bracketPos = FindCharInString(steamid3, ']', true);
-	if (colonPos == -1 || bracketPos == -1 || bracketPos <= colonPos) return;
-
-	int accLen = bracketPos - colonPos - 1;
-	if (accLen <= 0 || accLen >= 16) return;
-
-	char accountIdStr[16];
-	strcopy(accountIdStr, accLen + 1, steamid3[colonPos + 1]);
-
-	char base[24];
-	strcopy(base, sizeof(base), "76561197960265728");
-	int baseLen = strlen(base);
-	int addLen = strlen(accountIdStr);
-	int maxLen = (baseLen > addLen) ? baseLen : addLen;
-
-	char result[24];
-	int carry = 0;
-	for (int i = 0; i < maxLen; i++)
-	{
-		int baseDigit = (i < baseLen) ? (base[baseLen - 1 - i] - '0') : 0;
-		int addDigit  = (i < addLen)  ? (accountIdStr[addLen - 1 - i] - '0') : 0;
-		int sum = baseDigit + addDigit + carry;
-		carry = sum / 10;
-		result[maxLen - 1 - i] = '0' + (sum % 10);
-	}
-
-	if (carry > 0)
-	{
-		// Never actually happens with real Steam account IDs (nowhere near large enough to
-		// overflow the 17-digit base), but handled for correctness.
-		for (int i = maxLen; i > 0; i--) result[i] = result[i - 1];
-		result[0] = '0' + carry;
-		result[maxLen + 1] = '\0';
-	}
-	else
-	{
-		result[maxLen] = '\0';
-	}
-
-	strcopy(outId64, outSize, result);
-}
-
-// Batches up to ELO_API_BATCH_MAX queued lookups into a single Steam Web API call every 5 seconds
-// (a fixed poll instead of firing one request per queued player, to stay well under Steam's own
-// rate limits regardless of how many unknown historic players a fresh install has). Requests
-// format=vdf so the response is plain KeyValues text - SourceMod can parse that natively with no
-// JSON library dependency.
-public Action Timer_EloProcessApiQueue(Handle timer)
-{
-	if (g_EloApiQueue.Length == 0) return Plugin_Continue;
-
-	char apiKey[64];
-	cv_EloSteamApiKey.GetString(apiKey, sizeof(apiKey));
-	if (apiKey[0] == '\0')
-	{
-		g_EloApiQueue.Clear();
-		return Plugin_Continue;
-	}
-
-	if (GetFeatureStatus(FeatureType_Native, "SteamWorks_CreateHTTPRequest") != FeatureStatus_Available)
-	{
-		g_EloApiQueue.Clear();
-		return Plugin_Continue;
-	}
-
-	ArrayList batch = new ArrayList(ByteCountToCells(32));
-	char idList[4096];
-	idList[0] = '\0';
-
-	while (g_EloApiQueue.Length > 0 && batch.Length < ELO_API_BATCH_MAX)
-	{
-		char steamid3[32];
-		g_EloApiQueue.GetString(0, steamid3, sizeof(steamid3));
-		g_EloApiQueue.Erase(0);
-
-		char id64[24];
-		EloSteamID3ToID64(steamid3, id64, sizeof(id64));
-		if (id64[0] == '\0') continue;
-
-		if (batch.Length > 0) StrCat(idList, sizeof(idList), ",");
-		StrCat(idList, sizeof(idList), id64);
-		batch.PushString(steamid3);
-	}
-
-	if (batch.Length == 0)
-	{
-		delete batch;
-		return Plugin_Continue;
-	}
-
-	char url[4400];
-	Format(url, sizeof(url), "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=%s&format=vdf&steamids=%s", apiKey, idList);
-
-	Handle req = SteamWorks_CreateHTTPRequest(k_EHTTPMethodGET, url);
-	if (req == INVALID_HANDLE)
-	{
-		delete batch;
-		return Plugin_Continue;
-	}
-
-	SteamWorks_SetHTTPCallbacks(req, EloHttp_OnPlayerSummaries);
-	SteamWorks_SetHTTPRequestContextValue(req, view_as<int>(batch));
-	SteamWorks_SendHTTPRequest(req);
-
-	return Plugin_Continue;
-}
-
-public int EloHttp_OnPlayerSummaries(Handle request, bool failure, bool requestSuccessful, EHTTPStatusCode statusCode, any data)
-{
-	ArrayList batch = view_as<ArrayList>(data);
-
-	// Mark every steamid in this batch as checked (with no name yet) FIRST, so a permanently
-	// failing lookup (bad key, deleted account, transient error) never gets silently re-queued
-	// forever - a successful match below just overwrites this with the real name.
-	for (int i = 0; i < batch.Length; i++)
-	{
-		char steamid3[32];
-		batch.GetString(i, steamid3, sizeof(steamid3));
-		EloStoreApiLookupResult(steamid3, "");
-	}
-
-	if (!failure && requestSuccessful && statusCode == k_EHTTPStatusCode200OK)
-	{
-		int bodySize;
-		SteamWorks_GetHTTPResponseBodySize(request, bodySize);
-		if (bodySize > 0)
-		{
-			char[] body = new char[bodySize + 1];
-			SteamWorks_GetHTTPResponseBodyData(request, body, bodySize + 1);
-
-			KeyValues kv = new KeyValues("response");
-			if (kv.ImportFromString(body) && kv.JumpToKey("players") && kv.GotoFirstSubKey())
-			{
-				do
-				{
-					char steamid64[24], personaName[MAX_NAME_LENGTH];
-					kv.GetString("steamid", steamid64, sizeof(steamid64), "");
-					kv.GetString("personaname", personaName, sizeof(personaName), "");
-					if (steamid64[0] == '\0' || personaName[0] == '\0') continue;
-
-					for (int i = 0; i < batch.Length; i++)
-					{
-						char steamid3[32], candidateId64[24];
-						batch.GetString(i, steamid3, sizeof(steamid3));
-						EloSteamID3ToID64(steamid3, candidateId64, sizeof(candidateId64));
-						if (StrEqual(candidateId64, steamid64))
-						{
-							EloStoreApiLookupResult(steamid3, personaName);
-							break;
-						}
-					}
-				}
-				while (kv.GotoNextKey());
-			}
-			delete kv;
-		}
-	}
-
-	delete batch;
-	delete request;
-	return 0;
-}
-
-// Makes the "raw SteamID instead of a name" state impossible to miss, instead of silently
-// showing nothing - this note appears directly on both leaderboard menus (where an installer
-// will actually be looking) whenever the feature is off because no key is configured, so nobody
-// has to guess why old players aren't resolving to real names.
-void EloGetApiSetupNote(char[] outNote, int outSize)
-{
-	char apiKey[64];
-	cv_EloSteamApiKey.GetString(apiKey, sizeof(apiKey));
-	if (apiKey[0] != '\0')
-	{
-		outNote[0] = '\0';
-		return;
-	}
-	strcopy(outNote, outSize, "\n(Old players show raw SteamIDs - set sm_soccermod_elo_steamapikey to fix this, see README)");
-}
-
-void EloStoreApiLookupResult(const char[] steamid, const char[] apiName)
-{
-	KeyValues kv = new KeyValues("EloRatings");
-	kv.ImportFromFile(g_EloFile);
-	kv.JumpToKey(steamid, true);
-	kv.SetNum("apinamechecked", 1);
-	if (apiName[0] != '\0') kv.SetString("apiname", apiName);
-	kv.Rewind();
-	kv.ExportToFile(g_EloFile);
-	delete kv;
 }
 
 void EloSetDisplayName(const char[] steamid, const char[] newName, int adminClient)
@@ -970,8 +700,6 @@ public void OpenEloLeaderboardMenu(int client)
 			kv.GetSectionName(steamid, sizeof(steamid));
 			if (steamid[0] != '[') continue; // skip anything that isn't a steamid-shaped key
 
-			strcopy(steamids[count], 32, steamid);
-
 			char liveName[MAX_NAME_LENGTH];
 			liveName[0] = '\0';
 			for (int player = 1; player <= MaxClients; player++)
@@ -981,10 +709,15 @@ public void OpenEloLeaderboardMenu(int client)
 				GetClientAuthId(player, AuthId_Engine, sid, sizeof(sid));
 				if (StrEqual(sid, steamid)) { GetClientName(player, liveName, sizeof(liveName)); break; }
 			}
-			// Falls back to the raw SteamID if the player was never renamed and isn't online right
-			// now - that's the only identity we have on record for someone who's never connected
-			// during this session and has no admin-set display name.
-			EloGetDisplayName(steamid, liveName, names[count], MAX_NAME_LENGTH);
+			char displayName[MAX_NAME_LENGTH];
+			EloGetDisplayName(steamid, liveName, displayName, sizeof(displayName));
+			// Skip entirely rather than showing a raw SteamID - a player who has never joined
+			// the server since this plugin started tracking has no name to show at all, per
+			// Morten's request 2026-09-15 (better to just not list them than show cryptic IDs).
+			if (StrEqual(displayName, steamid)) continue;
+
+			strcopy(steamids[count], 32, steamid);
+			strcopy(names[count], MAX_NAME_LENGTH, displayName);
 
 			if (kv.JumpToKey(eloFormat6v6, false))
 			{
@@ -1029,9 +762,7 @@ public void OpenEloLeaderboardMenu(int client)
 
 	Menu menu = new Menu(EloLeaderboardMenuHandler);
 	char titleString[192];
-	char apiNote[128];
-	EloGetApiSetupNote(apiNote, sizeof(apiNote));
-	Format(titleString, sizeof(titleString), "Ranked Leaderboard (%i players, 6v6)\nClick a name for their Career page%s", count, apiNote);
+	Format(titleString, sizeof(titleString), "Ranked Leaderboard (%i players, 6v6)\nClick a name for their Career page", count);
 	menu.SetTitle(titleString);
 
 	if (count == 0)
@@ -1108,29 +839,26 @@ public void OpenEloUnrankedLeaderboardMenu(int client)
 
 	ArrayList steamidList = new ArrayList(ByteCountToCells(32));
 	ArrayList pointsList = new ArrayList();
-	int count = 0;
+	int fetched = 0;
 
 	if (GetFeatureStatus(FeatureType_Native, "SoccerMod_GetTopPlayersByPoints") == FeatureStatus_Available)
 	{
-		count = SoccerMod_GetTopPlayersByPoints(steamidList, pointsList, ELO_UNRANKED_MAX);
+		fetched = SoccerMod_GetTopPlayersByPoints(steamidList, pointsList, ELO_UNRANKED_MAX);
 	}
 
-	char titleString[192];
-	char apiNote[128];
-	EloGetApiSetupNote(apiNote, sizeof(apiNote));
-	Format(titleString, sizeof(titleString), "Unranked Leaderboard (%i players)\nClick a name for their Career page%s", count, apiNote);
-	menu.SetTitle(titleString);
-
-	if (count == 0)
-	{
-		menu.AddItem("none", "No unranked data available", ITEMDRAW_DISABLED);
-	}
+	// Filter out anyone we have no name for (never joined since this plugin started tracking) -
+	// skip them entirely rather than show a raw SteamID, per Morten's request 2026-09-15. Ranks
+	// are renumbered sequentially over what's actually shown, not the original fetched order, so
+	// there are no gaps like "#1, #3, #7".
+	char shownSteamids[ELO_UNRANKED_MAX][32];
+	char shownNames[ELO_UNRANKED_MAX][MAX_NAME_LENGTH];
+	int shownPoints[ELO_UNRANKED_MAX];
+	int shownCount = 0;
 
 	char steamid[32];
-	for (int i = 0; i < count; i++)
+	for (int i = 0; i < fetched; i++)
 	{
 		steamidList.GetString(i, steamid, sizeof(steamid));
-		int points = pointsList.Get(i);
 
 		char liveName[MAX_NAME_LENGTH];
 		liveName[0] = '\0';
@@ -1143,14 +871,32 @@ public void OpenEloUnrankedLeaderboardMenu(int client)
 		}
 		char name[MAX_NAME_LENGTH];
 		EloGetDisplayName(steamid, liveName, name, sizeof(name));
+		if (StrEqual(name, steamid)) continue;
 
-		char itemLabel[96];
-		Format(itemLabel, sizeof(itemLabel), "#%i %s - %i pts", i+1, name, points);
-		menu.AddItem(steamid, itemLabel);
+		strcopy(shownSteamids[shownCount], 32, steamid);
+		strcopy(shownNames[shownCount], MAX_NAME_LENGTH, name);
+		shownPoints[shownCount] = pointsList.Get(i);
+		shownCount++;
 	}
 
 	delete steamidList;
 	delete pointsList;
+
+	char titleString[192];
+	Format(titleString, sizeof(titleString), "Unranked Leaderboard (%i players)\nClick a name for their Career page", shownCount);
+	menu.SetTitle(titleString);
+
+	if (shownCount == 0)
+	{
+		menu.AddItem("none", "No unranked data available", ITEMDRAW_DISABLED);
+	}
+
+	for (int i = 0; i < shownCount; i++)
+	{
+		char itemLabel[96];
+		Format(itemLabel, sizeof(itemLabel), "#%i %s - %i pts", i+1, shownNames[i], shownPoints[i]);
+		menu.AddItem(shownSteamids[i], itemLabel);
+	}
 
 	menu.ExitBackButton = true;
 	menu.Display(client, MENU_TIME_FOREVER);

@@ -60,15 +60,13 @@ anything**, just in case.
   Silver → Gold → World Class → Legend) based on leaderboard rank — so tiers
   stay meaningful no matter how spread out ratings get over time.
 - **Automatic join-name history** — every distinct name the server has seen
-  a steamid connect with, tracked with timestamps, separate from admin-set
-  nicknames.
-- **Optional Steam name lookup for historic players** — on a fresh install,
-  a server's pre-existing lifetime stats table only has SteamIDs, no names,
-  so old players who haven't reconnected since installing this show up as
-  a raw SteamID on the Unranked leaderboard. If you set a free Steam Web API
-  key (see Configuration below), the plugin automatically looks up and
-  caches their real current Steam name instead — no reconnect needed. Fully
-  optional; leave the key empty and nothing changes.
+  a steamid connect with, tracked with timestamps and remembered even while
+  they're offline, separate from admin-set nicknames. This is also what
+  leaderboards fall back to for a player's name when they're not currently
+  connected: a server's pre-existing lifetime stats table only has SteamIDs,
+  no names, so a player who has never joined since this plugin was installed
+  shows as a raw SteamID until the first time they actually connect — after
+  that, their name is remembered from then on.
 - **Admin tools** — rename a player's stat display name (with history), or
   manually adjust a player's ELO, both from an in-game menu.
 - **ELO-aware cap picking** — the two candidate captains' ELO decides who
@@ -84,7 +82,6 @@ anything**, just in case.
 
 - SourceMod 1.11+
 - SoMoE-19 soccer_mod
-- SteamWorks extension — only needed if you set `sm_soccermod_elo_steamapikey` (optional, see below). Most SoMoE-19 servers already have it, since soccer_mod itself uses it elsewhere.
 
 ## Installation
 
@@ -145,7 +142,6 @@ Type `!elo` in chat to open the menu. That's it.
 | `sm_soccermod_elo_datapath` | *(empty)* | Custom folder for ELO's data files. Leave empty to use `addons/sourcemod/data/elo_ranking/` (works with zero setup). Only set this if you want the data stored somewhere else, e.g. a mount that survives a full server reinstall. |
 | `sm_soccermod_elo_tiebreak_pct` | `6.0` | If the two cap-designate captains' ELO differs by less than this percent, fall back to a knife duel instead of auto-picking who goes first. |
 | `sm_soccermod_elo_6v6_minmin` | `25.0` | Minimum match length (minutes) for a Ranked 6v6 cap to count toward ELO. Rosters of 5 per side also qualify (covers a team briefly playing a player short mid-match). |
-| `sm_soccermod_elo_steamapikey` | *(empty)* | Optional free key from [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey). When set, historic players without a live/admin-set name get their real current Steam name looked up automatically instead of showing a raw SteamID. Requires the SteamWorks extension. Leave empty to disable. |
 
 ## Notes
 
@@ -153,7 +149,10 @@ Type `!elo` in chat to open the menu. That's it.
   from real, qualifying matches, regardless of how long your server has been
   running soccer_mod before installing this.
 - Unranked data comes straight from your existing `soccer_mod_public_stats`
-  table, so it reflects your server's real history from day one.
+  table, so it reflects your server's real history from day one. A player
+  from that pre-existing history who hasn't joined the server since
+  installing this plugin won't appear on the leaderboard yet (there's no
+  name to show them with) - they'll show up the first time they reconnect.
 - `soccer_mod_patch/` was built and tested against SoMoE-19's `master` branch.
   If you're on an older tagged release, the surrounding code may have shifted
   slightly - the ELO-marked lines are still the same, just double-check they
