@@ -144,5 +144,5 @@ Soccer Mod itself goes to:
   and Updater (GoD-Tony) — see the [SoMoE-19 README](https://github.com/MK99MA/SoMoE-19#readme)
   for the full list.
 
-The ELO ranking system itself (this repo) was built for and by the "Pons"
-CS:S community.
+The ELO ranking system itself (this repo) was built for and by the Titans
+clan and the soccer CS:S community.
