@@ -7,6 +7,7 @@
 #include <sdktools>
 #include <cstrike>
 #include <morecolors>
+#include <SteamWorks>
 
 #include "elo_ranking.inc"
 
@@ -94,6 +95,16 @@ Menu   eloSwapMenu;
 // cvar-backed
 ConVar cv_EloCapTiebreakPct;
 ConVar cv_Elo6v6MinMinutes;
+ConVar cv_EloSteamApiKey;
+
+// Steam Web API name lookup (optional - only runs at all if sm_soccermod_elo_steamapikey is set).
+// The ONLY way a historic player (someone in soccer_mod's old stats who hasn't reconnected since
+// this plugin was installed) ever gets a real name instead of a raw SteamID - see EloGetDisplayName,
+// EloQueueSteamApiLookup, Timer_EloProcessApiQueue. Queued rather than looked up synchronously
+// because HTTP is inherently async and EloGetDisplayName is called on every single leaderboard row
+// render, so it must stay cheap.
+ArrayList g_EloApiQueue;
+#define ELO_API_BATCH_MAX 100 // Steam Web API's own documented limit for GetPlayerSummaries
 
 // ****************************************************************************************************
 // ******************************************** INIT / CVARS ********************************************
@@ -122,6 +133,13 @@ public void OnPluginStart()
 	cv_EloDataPath = CreateConVar("sm_soccermod_elo_datapath", "",
 		"Custom absolute directory for ELO's data files. Leave empty (default) to use addons/sourcemod/data/elo_ranking/ - works out of the box on any server with zero setup. Only set this if you specifically want the data stored somewhere else (e.g. a separate mount that survives full server reinstalls).");
 	cv_EloDataPath.AddChangeHook(OnEloDataPathChanged);
+
+	cv_EloSteamApiKey = CreateConVar("sm_soccermod_elo_steamapikey", "",
+		"Optional free Steam Web API key (get one at https://steamcommunity.com/dev/apikey). When set, ELO ranking automatically looks up real Steam names for historic players who haven't reconnected since this plugin was installed, instead of showing a raw SteamID on the leaderboards. Leave empty to disable - everything else works exactly the same either way. Requires the SteamWorks extension.",
+		FCVAR_PROTECTED);
+
+	g_EloApiQueue = new ArrayList(ByteCountToCells(32));
+	CreateTimer(5.0, Timer_EloProcessApiQueue, _, TIMER_REPEAT);
 
 	// DANGEROUS BUG FIXED HERE (2026-09-10, take 2): both FileExists() AND a plain OpenFile(...,"r")
 	// probe false-negative on this absolute path specifically when called this early in plugin
@@ -608,6 +626,9 @@ void EloGetDisplayName(const char[] steamid, const char[] liveName, char[] outNa
 	kv.JumpToKey(steamid, true);
 	char nickname[MAX_NAME_LENGTH];
 	kv.GetString("displayname", nickname, sizeof(nickname), "");
+	char apiName[MAX_NAME_LENGTH];
+	kv.GetString("apiname", apiName, sizeof(apiName), "");
+	bool apiChecked = (kv.GetNum("apinamechecked", 0) != 0);
 	delete kv;
 
 	// Pass "" for liveName when the player isn't currently connected and no live name could be
@@ -623,8 +644,214 @@ void EloGetDisplayName(const char[] steamid, const char[] liveName, char[] outNa
 		strcopy(outName, outSize, nickname);
 	else if (haveRealLiveName)
 		strcopy(outName, outSize, liveName);
+	else if (apiName[0] != '\0')
+		strcopy(outName, outSize, apiName);
 	else
+	{
 		strcopy(outName, outSize, steamid);
+		// Last resort: nothing else identifies this player at all, and we haven't tried the
+		// Steam Web API yet for them - queue it (async, see Timer_EloProcessApiQueue) so the
+		// NEXT time this menu is opened, a real name is there instead. No-op if no API key is
+		// configured.
+		if (!apiChecked) EloQueueSteamApiLookup(steamid);
+	}
+}
+
+void EloQueueSteamApiLookup(const char[] steamid)
+{
+	char apiKey[64];
+	cv_EloSteamApiKey.GetString(apiKey, sizeof(apiKey));
+	if (apiKey[0] == '\0') return; // feature is off unless a key is configured
+
+	if (g_EloApiQueue.FindString(steamid) != -1) return; // already queued, don't duplicate
+	if (g_EloApiQueue.Length >= 500) return; // sane upper bound, never grows unbounded
+
+	g_EloApiQueue.PushString(steamid);
+}
+
+// Converts a Steam3 ID ("[U:1:XXXXXXXXX]", the format GetClientAuthId(..., AuthId_Engine, ...)
+// returns and the format every steamid is keyed by throughout this file) into a SteamID64 decimal
+// string, via schoolbook decimal addition of the account ID onto the fixed universe/type/instance
+// base - needed because a SteamID64 (up to ~7.6*10^16) doesn't fit in Pawn's 32-bit cells or in a
+// double without losing precision, so this can't just be done with normal integer/float math.
+void EloSteamID3ToID64(const char[] steamid3, char[] outId64, int outSize)
+{
+	outId64[0] = '\0';
+
+	int colonPos = FindCharInString(steamid3, ':', true);
+	int bracketPos = FindCharInString(steamid3, ']', true);
+	if (colonPos == -1 || bracketPos == -1 || bracketPos <= colonPos) return;
+
+	int accLen = bracketPos - colonPos - 1;
+	if (accLen <= 0 || accLen >= 16) return;
+
+	char accountIdStr[16];
+	strcopy(accountIdStr, accLen + 1, steamid3[colonPos + 1]);
+
+	char base[24];
+	strcopy(base, sizeof(base), "76561197960265728");
+	int baseLen = strlen(base);
+	int addLen = strlen(accountIdStr);
+	int maxLen = (baseLen > addLen) ? baseLen : addLen;
+
+	char result[24];
+	int carry = 0;
+	for (int i = 0; i < maxLen; i++)
+	{
+		int baseDigit = (i < baseLen) ? (base[baseLen - 1 - i] - '0') : 0;
+		int addDigit  = (i < addLen)  ? (accountIdStr[addLen - 1 - i] - '0') : 0;
+		int sum = baseDigit + addDigit + carry;
+		carry = sum / 10;
+		result[maxLen - 1 - i] = '0' + (sum % 10);
+	}
+
+	if (carry > 0)
+	{
+		// Never actually happens with real Steam account IDs (nowhere near large enough to
+		// overflow the 17-digit base), but handled for correctness.
+		for (int i = maxLen; i > 0; i--) result[i] = result[i - 1];
+		result[0] = '0' + carry;
+		result[maxLen + 1] = '\0';
+	}
+	else
+	{
+		result[maxLen] = '\0';
+	}
+
+	strcopy(outId64, outSize, result);
+}
+
+// Batches up to ELO_API_BATCH_MAX queued lookups into a single Steam Web API call every 5 seconds
+// (a fixed poll instead of firing one request per queued player, to stay well under Steam's own
+// rate limits regardless of how many unknown historic players a fresh install has). Requests
+// format=vdf so the response is plain KeyValues text - SourceMod can parse that natively with no
+// JSON library dependency.
+public Action Timer_EloProcessApiQueue(Handle timer)
+{
+	if (g_EloApiQueue.Length == 0) return Plugin_Continue;
+
+	char apiKey[64];
+	cv_EloSteamApiKey.GetString(apiKey, sizeof(apiKey));
+	if (apiKey[0] == '\0')
+	{
+		g_EloApiQueue.Clear();
+		return Plugin_Continue;
+	}
+
+	if (GetFeatureStatus(FeatureType_Native, "SteamWorks_CreateHTTPRequest") != FeatureStatus_Available)
+	{
+		g_EloApiQueue.Clear();
+		return Plugin_Continue;
+	}
+
+	ArrayList batch = new ArrayList(ByteCountToCells(32));
+	char idList[4096];
+	idList[0] = '\0';
+
+	while (g_EloApiQueue.Length > 0 && batch.Length < ELO_API_BATCH_MAX)
+	{
+		char steamid3[32];
+		g_EloApiQueue.GetString(0, steamid3, sizeof(steamid3));
+		g_EloApiQueue.Erase(0);
+
+		char id64[24];
+		EloSteamID3ToID64(steamid3, id64, sizeof(id64));
+		if (id64[0] == '\0') continue;
+
+		if (batch.Length > 0) StrCat(idList, sizeof(idList), ",");
+		StrCat(idList, sizeof(idList), id64);
+		batch.PushString(steamid3);
+	}
+
+	if (batch.Length == 0)
+	{
+		delete batch;
+		return Plugin_Continue;
+	}
+
+	char url[4400];
+	Format(url, sizeof(url), "https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v0002/?key=%s&format=vdf&steamids=%s", apiKey, idList);
+
+	Handle req = SteamWorks_CreateHTTPRequest(k_EHTTPMethodGET, url);
+	if (req == INVALID_HANDLE)
+	{
+		delete batch;
+		return Plugin_Continue;
+	}
+
+	SteamWorks_SetHTTPCallbacks(req, EloHttp_OnPlayerSummaries);
+	SteamWorks_SetHTTPRequestContextValue(req, view_as<int>(batch));
+	SteamWorks_SendHTTPRequest(req);
+
+	return Plugin_Continue;
+}
+
+public int EloHttp_OnPlayerSummaries(Handle request, any data, bool failure, bool requestSuccessful, EHTTPStatusCode statusCode)
+{
+	ArrayList batch = view_as<ArrayList>(data);
+
+	// Mark every steamid in this batch as checked (with no name yet) FIRST, so a permanently
+	// failing lookup (bad key, deleted account, transient error) never gets silently re-queued
+	// forever - a successful match below just overwrites this with the real name.
+	for (int i = 0; i < batch.Length; i++)
+	{
+		char steamid3[32];
+		batch.GetString(i, steamid3, sizeof(steamid3));
+		EloStoreApiLookupResult(steamid3, "");
+	}
+
+	if (!failure && requestSuccessful && statusCode == k_EHTTPStatusCode200OK)
+	{
+		int bodySize;
+		SteamWorks_GetHTTPResponseBodySize(request, bodySize);
+		if (bodySize > 0)
+		{
+			char[] body = new char[bodySize + 1];
+			SteamWorks_GetHTTPResponseBodyData(request, body, bodySize + 1);
+
+			KeyValues kv = new KeyValues("response");
+			if (kv.ImportFromString(body) && kv.JumpToKey("players") && kv.GotoFirstSubKey())
+			{
+				do
+				{
+					char steamid64[24], personaName[MAX_NAME_LENGTH];
+					kv.GetString("steamid", steamid64, sizeof(steamid64), "");
+					kv.GetString("personaname", personaName, sizeof(personaName), "");
+					if (steamid64[0] == '\0' || personaName[0] == '\0') continue;
+
+					for (int i = 0; i < batch.Length; i++)
+					{
+						char steamid3[32], candidateId64[24];
+						batch.GetString(i, steamid3, sizeof(steamid3));
+						EloSteamID3ToID64(steamid3, candidateId64, sizeof(candidateId64));
+						if (StrEqual(candidateId64, steamid64))
+						{
+							EloStoreApiLookupResult(steamid3, personaName);
+							break;
+						}
+					}
+				}
+				while (kv.GotoNextKey());
+			}
+			delete kv;
+		}
+	}
+
+	delete batch;
+	delete request;
+	return 0;
+}
+
+void EloStoreApiLookupResult(const char[] steamid, const char[] apiName)
+{
+	KeyValues kv = new KeyValues("EloRatings");
+	kv.ImportFromFile(g_EloFile);
+	kv.JumpToKey(steamid, true);
+	kv.SetNum("apinamechecked", 1);
+	if (apiName[0] != '\0') kv.SetString("apiname", apiName);
+	kv.Rewind();
+	kv.ExportToFile(g_EloFile);
+	delete kv;
 }
 
 void EloSetDisplayName(const char[] steamid, const char[] newName, int adminClient)

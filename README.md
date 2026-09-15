@@ -62,6 +62,13 @@ anything**, just in case.
 - **Automatic join-name history** — every distinct name the server has seen
   a steamid connect with, tracked with timestamps, separate from admin-set
   nicknames.
+- **Optional Steam name lookup for historic players** — on a fresh install,
+  a server's pre-existing lifetime stats table only has SteamIDs, no names,
+  so old players who haven't reconnected since installing this show up as
+  a raw SteamID on the Unranked leaderboard. If you set a free Steam Web API
+  key (see Configuration below), the plugin automatically looks up and
+  caches their real current Steam name instead — no reconnect needed. Fully
+  optional; leave the key empty and nothing changes.
 - **Admin tools** — rename a player's stat display name (with history), or
   manually adjust a player's ELO, both from an in-game menu.
 - **ELO-aware cap picking** — the two candidate captains' ELO decides who
@@ -77,6 +84,7 @@ anything**, just in case.
 
 - SourceMod 1.11+
 - SoMoE-19 soccer_mod
+- SteamWorks extension — only needed if you set `sm_soccermod_elo_steamapikey` (optional, see below). Most SoMoE-19 servers already have it, since soccer_mod itself uses it elsewhere.
 
 ## Installation
 
@@ -124,6 +132,7 @@ Type `!elo` in chat to open the menu. That's it.
 | `sm_soccermod_elo_datapath` | *(empty)* | Custom folder for ELO's data files. Leave empty to use `addons/sourcemod/data/elo_ranking/` (works with zero setup). Only set this if you want the data stored somewhere else, e.g. a mount that survives a full server reinstall. |
 | `sm_soccermod_elo_tiebreak_pct` | `6.0` | If the two cap-designate captains' ELO differs by less than this percent, fall back to a knife duel instead of auto-picking who goes first. |
 | `sm_soccermod_elo_6v6_minmin` | `25.0` | Minimum match length (minutes) for a Ranked 6v6 cap to count toward ELO. Rosters of 5 per side also qualify (covers a team briefly playing a player short mid-match). |
+| `sm_soccermod_elo_steamapikey` | *(empty)* | Optional free key from [steamcommunity.com/dev/apikey](https://steamcommunity.com/dev/apikey). When set, historic players without a live/admin-set name get their real current Steam name looked up automatically instead of showing a raw SteamID. Requires the SteamWorks extension. Leave empty to disable. |
 
 ## Notes
 
