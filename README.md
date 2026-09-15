@@ -95,10 +95,23 @@ always put your originals back.
 
 **Step 1 — install the ELO plugin itself:**
 
-1. Copy `elo_ranking.sp` into `addons/sourcemod/scripting/`
-2. Copy `elo_ranking.inc` into `addons/sourcemod/scripting/include/`
-3. Compile `elo_ranking.sp` (using your SourceMod's `spcomp`/`spcomp64`) and
-   put the resulting `elo_ranking.smx` into `addons/sourcemod/plugins/`
+This repo includes an already-compiled `elo_ranking.smx` — you do **not** need
+to compile anything yourself unless you want to (e.g. you're on a very
+different SourceMod version and want a matching build).
+
+1. Copy `elo_ranking.smx` into `addons/sourcemod/plugins/`
+2. Copy `elo_ranking.inc` into `addons/sourcemod/scripting/include/` (only
+   needed if you later recompile `soccer_mod.sp` yourself)
+
+**Compiling it yourself instead (optional):** copy `elo_ranking.sp` into
+`addons/sourcemod/scripting/` and compile it with your SourceMod's
+`spcomp`/`spcomp64`. Note this is more finicky than it sounds — a mismatched
+`spcomp`/include-file pairing (e.g. your server's bundled compiler against a
+different SourceMod version's includes) can fail with confusing errors, or
+in the worst case silently produce a broken build. If you hit compiler
+errors, fetch a matching `spcomp64` + `include/` pair directly from
+[sm.alliedmods.net](https://sm.alliedmods.net/smdrop/) for your SourceMod
+version instead of relying on whatever your server happens to already have.
 
 **Step 2 — bring in the soccer_mod files ELO needs to hook into:**
 
